@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Nexus — Sohbet</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230dbd8b'/%3E%3Ctext x='32' y='44' font-size='36' font-weight='800' text-anchor='middle' fill='%2304140f' font-family='sans-serif'%3EN%3C/text%3E%3C/svg%3E">
 <style>
   :root{
     --bg:#0d1117; --panel:#11161d; --panel2:#161b24; --panel3:#1c2330;
@@ -200,6 +201,46 @@
   .aMsgDel:hover{background:rgba(240,74,94,.15)}
   .aEmpty{padding:40px 16px;text-align:center;color:var(--muted);font-size:14px}
 
+  .gSelHead{display:flex;justify-content:space-between;align-items:center;font-size:12px;
+    color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:4px 0 9px}
+  .gSelHead b{color:var(--acc);font-size:13px;font-weight:800}
+  .gPickBar{position:relative;margin-bottom:10px}
+  .gPickBar input{width:100%;padding:10px 13px 10px 34px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:10px;color:var(--txt);font-size:14px;outline:none}
+  .gPickBar input:focus{border-color:var(--acc)}
+  .gPickBar span{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px}
+  #groupMembers{display:flex;flex-direction:column;gap:1px}
+  .gCheck{width:25px;height:25px;flex:none;border-radius:50%;border:2px solid var(--line);
+    display:grid;place-items:center;font-size:13px;font-weight:800;color:transparent;transition:.15s}
+  .row.picked{background:rgba(13,189,139,.12)}
+  .row.picked .gCheck{background:var(--acc);border-color:var(--acc);color:#04140f}
+  .gFoot{padding:12px 16px;border-top:1px solid var(--line);background:var(--panel)}
+  .gFoot .btnMain:disabled{opacity:.4}
+
+  .giHead{text-align:center;padding:4px 0 16px;border-bottom:1px solid var(--line);margin-bottom:14px}
+  .giAvatar{width:86px;height:86px;border-radius:24px;margin:0 auto 12px;display:grid;place-items:center;
+    font-size:36px;color:#04140f}
+  .giName{font-size:21px;font-weight:750}
+  .giSub{font-size:13px;color:var(--muted);margin-top:5px}
+  .giRow{display:flex;align-items:center;gap:11px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:11px;padding:10px 12px;margin-bottom:8px}
+  .giRow .rowMain{min-width:0;flex:1}
+  .gMe{font-size:11.5px;color:var(--acc);font-weight:600}
+  .gRole{font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:20px;letter-spacing:.4px;
+    background:var(--panel3);color:var(--muted);border:1px solid var(--line);flex:none;text-transform:uppercase}
+  .gRole.r-kurucu{background:rgba(240,74,94,.16);color:#ff8b98;border-color:rgba(240,74,94,.4)}
+  .gRole.r-yönetici{background:rgba(242,169,59,.16);color:#ffd08a;border-color:rgba(242,169,59,.4)}
+  .giLeave{width:100%;margin-top:16px;padding:13px;border-radius:11px;font-size:14.5px;font-weight:700;
+    background:rgba(240,74,94,.12);border:1px solid rgba(240,74,94,.4);color:#ff8b98;transition:.15s}
+  .giLeave:hover{background:rgba(240,74,94,.26)}
+
+  .sysChip{align-self:center;max-width:88%;text-align:center;background:rgba(28,35,48,.75);
+    border:1px solid var(--line);color:var(--muted);font-size:12px;padding:5px 13px;
+    border-radius:12px;margin:9px 0}
+  .msgWho{font-size:11.5px;font-weight:750;margin-bottom:2px}
+  .rowGrp{display:none}
+  .gIco{font-size:19px;line-height:1}
+
   .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(90px);
     background:var(--panel3);border:1px solid var(--line);color:var(--txt);padding:11px 18px;
     border-radius:11px;font-size:14px;opacity:0;transition:.25s;z-index:99;max-width:90vw;text-align:center}
@@ -249,6 +290,7 @@
         </div>
         <div style="display:flex;gap:8px">
           <button class="iconBtn hidden" id="adminBtn" title="Yönetim paneli">⚙</button>
+          <button class="iconBtn" id="newGroupBtn" title="Yeni grup">👥</button>
           <button class="iconBtn" id="newChatBtn" title="Yeni sohbet">＋</button>
           <button class="iconBtn" id="logoutBtn" title="Çıkış">⎋</button>
         </div>
@@ -338,7 +380,41 @@
   </div>
 </div>
 
-<audio id="remoteAudio" autoplay></audio>
+<div class="overlay hidden" id="groupOverlay" style="align-items:stretch;padding:0">
+  <div class="adminWrap">
+    <div class="adminHead">
+      <div class="adminTitle">👥 Yeni grup</div>
+      <button class="iconBtn" id="groupClose">✕</button>
+    </div>
+    <div class="adminBody">
+      <div class="field" style="margin-bottom:14px">
+        <label>Grup adı</label>
+        <input id="groupName" placeholder="orn. Kafa Ekibi" maxlength="40">
+      </div>
+      <div class="gSelHead">Üyeleri seç <b id="gSelCount">0</b></div>
+      <div class="gPickBar">
+        <span>⌕</span>
+        <input id="groupSearch" placeholder="Üye ara">
+      </div>
+      <div id="groupMembers"></div>
+    </div>
+    <div class="gFoot">
+      <button class="btnMain" id="groupCreate" disabled>Grubu oluştur</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="ginfoOverlay" style="align-items:stretch;padding:0">
+  <div class="adminWrap" style="max-width:520px">
+    <div class="adminHead">
+      <div class="adminTitle">Grup bilgisi</div>
+      <button class="iconBtn" id="ginfoClose">✕</button>
+    </div>
+    <div class="adminBody" id="ginfoBody"></div>
+  </div>
+</div>
+
+<audio id="remoteAudio" autoplay playsinline></audio>
 <div class="toast" id="toast"></div>
 
 <script type="module" src="app.js"></script>
