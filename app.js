@@ -47,8 +47,12 @@ let chats = [];
 let active = null;
 let unsubMsgs = null;
 let lastMsgs = [];
+let lastMsgsFor = null;
 let activeTab = "chats";
 let typingSeen = 0;
+let replyTo = null;
+let editing = null;
+let fwdMid = null;
 
 /* ===== PROFIL YARDIMCILARI ===== */
 function initialsOf(name){
@@ -170,9 +174,18 @@ function startApp(){
   onSnapshot(query(collection(db,"sohbetler"), where("uyeler","array-contains", me.uid)), snap=>{
     chats = snap.docs.map(d=>({ id:d.id, ...d.data() }))
       .sort((a,b)=> (b.sonMesajZaman||0) - (a.sonMesajZaman||0));
+    snap.docChanges().forEach(ch=>{
+      const d = ch.doc.data();
+      const ts = d.sonMesajZaman || 0;
+      if(!ts || d.sonMesajYazar === me.uid) return;
+      if((d.uyeler||[]).indexOf(me.uid) < 0) return;
+      const tz = (d.teslimZaman||{})[me.uid] || 0;
+      if(ts > tz) updateDoc(ch.doc.ref, { [`teslimZaman.${me.uid}`]: ts }).catch(()=>{});
+    });
     renderSide();
     if(active){
       renderChatHeader();
+      if(lastMsgsFor === active.id && lastMsgs.length) renderMsgs(lastMsgs);
       const c = chats.find(x=>x.id===active.id);
       if(c && ((c.okunmamis||{})[me.uid]||0) > 0){
         updateDoc(doc(db,"sohbetler",active.id), { [`okunmamis.${me.uid}`]: 0 }).catch(()=>{});
@@ -307,8 +320,8 @@ function renderSide(){
   });
 }
 /* ===== CHAT ===== */
-async function openChat(otherUid){
-  const otherUser = users.find(u=>u.uid===otherUid);
+async function ensureDm(otherUid){
+  const otherUser = userBy(otherUid);
   const otherAd = otherUser ? otherUser.ad : otherUid;
   const id = [me.uid, otherUid].sort().join("~");
   const ref = doc(db,"sohbetler",id);
@@ -323,7 +336,15 @@ async function openChat(otherUid){
         okunmamis: {}, yaziyor: {}
       });
     }
-  }catch(e){ toast("Sohbet açılamadı: "+e.message, true); return; }
+  }catch(e){ toast("Sohbet açılamadı: "+e.message, true); throw e; }
+  return id;
+}
+
+async function openChat(otherUid){
+  let id;
+  try{ id = await ensureDm(otherUid); }
+  catch(e){ return; }
+  const otherAd = adOf(otherUid, otherUid);
   enterChat({ id, type:"dm", other: otherUid, otherAd });
 }
 
@@ -335,6 +356,9 @@ function openGroupChat(cid){
 
 function enterChat(a){
   active = a;
+  cancelCtx();
+  activeTab = "chats";
+  document.querySelectorAll(".sideTab").forEach(x=> x.classList.toggle("on", x.dataset.tab === "chats"));
   document.body.classList.add("inChat");
   $("phView").classList.add("hidden");
   $("chatView").classList.remove("hidden");
@@ -347,8 +371,11 @@ function enterChat(a){
 
   if(unsubMsgs) unsubMsgs();
   const ref = doc(db,"sohbetler",active.id);
+  lastMsgs = [];
+  lastMsgsFor = null;
   unsubMsgs = onSnapshot(query(collection(ref,"mesajlar"), orderBy("ts","asc")), snap=>{
     lastMsgs = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    lastMsgsFor = active && active.id;
     renderMsgs(lastMsgs);
     markRead(ref, snap.docs, active && active.type === "grup");
   }, e => toast("Mesajlar yüklenemedi: "+e.message, true));
@@ -395,7 +422,10 @@ function markRead(ref, docs, grp){
   let n = 0;
   docs.forEach(d=>{
     const m = d.data();
-    if(m.yazan !== me.uid && !m.okundu){ batch.update(d.ref, { okundu:true }); n++; }
+    if(m.yazan !== me.uid && !m.okundu){
+      batch.update(d.ref, { okundu:true, okuyan: arrayUnion(me.uid) });
+      n++;
+    }
   });
   if(n) batch.commit().catch(()=>{});
 }
@@ -408,14 +438,19 @@ function highlight(text, term){
 }
 
 function tickHtml(m, mine){
-  if(!mine) return "";
-  const grp = active && active.type === "grup";
-  if(!grp) return m.okundu ? '<span class="ticks read">✓✓</span>' : '<span class="ticks">✓</span>';
-  const others = (active.uyeler || []).filter(u => u !== me.uid);
-  const read = m.okuyan || [];
-  const n = others.filter(u => read.indexOf(u) >= 0).length;
-  if(others.length && n >= others.length) return '<span class="ticks read">✓✓</span>';
-  if(n > 0) return '<span class="ticks">✓✓</span>';
+  if(!mine || !active) return "";
+  const grp = active.type === "grup";
+  const c = chats.find(x=>x.id===active.id);
+  const tz = (c && c.teslimZaman) || {};
+  const others = grp
+    ? (active.uyeler || []).filter(u => u !== me.uid)
+    : (active.other ? [active.other] : []);
+  if(!others.length) return '<span class="ticks">✓</span>';
+  const ts = m.ts || 0;
+  const delivered = others.every(u => (tz[u] || 0) >= ts);
+  const read = others.every(u => (m.okuyan||[]).indexOf(u) >= 0 || m.okundu === true);
+  if(read) return '<span class="ticks read">✓✓</span>';
+  if(delivered) return '<span class="ticks">✓✓</span>';
   return '<span class="ticks">✓</span>';
 }
 
@@ -438,10 +473,15 @@ function renderMsgs(msgs){
     const mine = m.yazan === me.uid;
     const who = (grp && !mine && m.yazanAd)
       ? `<div class="msgWho" style="color:${colorFor(m.yazan)}">${esc(m.yazanAd)}</div>` : "";
+    const quote = m.yanit
+      ? `<div class="msgQuote" data-q="${esc(m.yanit.mid)}" title="O mesaja git">
+           <b>${esc(m.yanit.ad)}</b><span>${esc(m.yanit.ozet || "")}</span></div>`
+      : "";
+    const ed = m.duzenlendi ? " · düzenlendi" : "";
     const meta = mine
-      ? `<span class="msgMeta">${hhmm(t)} ${tickHtml(m, mine)}</span>`
-      : `<span class="msgMeta">${hhmm(t)}</span>`;
-    html += `<div class="msg ${mine?"me":"them"}" data-mid="${m.id}">${who}${highlight(m.icerik, term)}${meta}`
+      ? `<span class="msgMeta">${hhmm(t)}${ed} ${tickHtml(m, mine)}</span>`
+      : `<span class="msgMeta">${hhmm(t)}${ed}</span>`;
+    html += `<div class="msg ${mine?"me":"them"}" data-mid="${m.id}">${quote}${who}${highlight(m.icerik, term)}${meta}`
       + `<button class="msgMore" data-more="${m.id}" title="Mesaj işlemleri">⋮</button></div>`;
   });
 
@@ -467,7 +507,13 @@ function openMsgMenu(mid, x, y){
   if((m.silinen||[]).indexOf(me.uid) >= 0) return;
   const mine = m.yazan === me.uid;
   const isAdmin = me.rol === "admin";
-  const items = [{ k:"mine", i:"🙈", t:"Benden sil" }];
+  const items = [];
+  if(!m.sistem){
+    items.push({ k:"reply", i:"↩", t:"Yanıtla" });
+    items.push({ k:"fwd", i:"➡", t:"İlet" });
+    if(mine && Date.now() - (m.ts||0) < 15*60*1000) items.push({ k:"edit", i:"✏", t:"Düzenle" });
+  }
+  items.push({ k:"mine", i:"🙈", t:"Benden sil" });
   if(mine || isAdmin) items.push({ k:"all", i:"🗑", t:"Herkesten sil", d:true });
 
   const menu = $("msgMenu");
@@ -488,10 +534,109 @@ function openMsgMenu(mid, x, y){
       e.stopPropagation();
       const k = b.dataset.mi;
       closeMsgMenu();
-      doDelete(mid, k);
+      if(k === "reply") setReply(mid);
+      else if(k === "fwd") openForward(mid);
+      else if(k === "edit") startEdit(mid);
+      else doDelete(mid, k);
     });
   });
 }
+
+/* --- yanitla / ilet / duzenle --- */
+function setReply(mid){
+  const m = lastMsgs.find(z=>z.id===mid);
+  if(!m) return;
+  editing = null;
+  replyTo = { mid:m.id, yazan:m.yazan, ad:m.yazanAd || m.yazan, ozet:(m.icerik||"").slice(0,150) };
+  showCtx("reply");
+  $("input").focus();
+}
+function startEdit(mid){
+  const m = lastMsgs.find(z=>z.id===mid);
+  if(!m || m.yazan !== me.uid) return;
+  if(Date.now() - (m.ts||0) > 15*60*1000){ toast("Düzenleme süresi doldu (15 dakika)", true); return; }
+  replyTo = null;
+  editing = { mid:m.id };
+  const el = $("input");
+  el.value = m.icerik || "";
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 120) + "px";
+  showCtx("edit");
+  el.focus();
+}
+function showCtx(mode){
+  const bar = $("ctxBar");
+  if(!mode){ bar.classList.add("hidden"); replyTo = null; editing = null; return; }
+  bar.classList.remove("hidden");
+  bar.classList.toggle("edit", mode === "edit");
+  $("ctxIcon").textContent = mode === "edit" ? "✏" : "↩";
+  if(mode === "edit"){
+    $("ctxAd").textContent = "Mesajı düzenle";
+    $("ctxTxt").textContent = editing ? (editing.icerik || "") : "";
+  }else{
+    $("ctxAd").textContent = replyTo ? replyTo.ad : "";
+    $("ctxTxt").textContent = replyTo ? replyTo.ozet : "";
+  }
+}
+function cancelCtx(){ showCtx(null); }
+$("ctxClose").addEventListener("click", cancelCtx);
+
+function openForward(mid){
+  const m = lastMsgs.find(z=>z.id===mid);
+  if(!m || !active) return;
+  fwdMid = mid;
+  const chatRows = chats.filter(c=>c.id !== active.id).map(c=>{
+    const grp = isGrup(c);
+    const other = grp ? null : c.uyeler.find(u=>u!==me.uid);
+    const name = grp ? (c.grupAd || "Adsız grup")
+      : adOf(other, (c.uyelerAd && c.uyelerAd[other]) || other);
+    return `<div class="row" data-fwd="${esc(c.id)}">
+      ${avatarHtml(grp ? { uid:c.id, icon:"👥" } : { uid:other, ad:name, photo:fotoOf(other) })}
+      <div class="rowMain">
+        <div class="rowLine1"><span class="rowName">${esc(name)}</span></div>
+        <div class="rowLine2"><span class="rowLast">${grp ? ((c.uyeler||[]).length + " üye") : "@"+other}</span></div>
+      </div></div>`;
+  }).join("");
+  const peopleRows = users.filter(u=>u.uid!==me.uid).map(u=>
+    `<div class="row" data-fwduser="${esc(u.uid)}">
+      ${avatarHtml({ uid:u.uid, ad:u.ad, photo:fotoOf(u.uid) })}
+      <div class="rowMain">
+        <div class="rowLine1"><span class="rowName">${esc(u.ad)}</span></div>
+        <div class="rowLine2"><span class="rowLast">@${u.uid}</span></div>
+      </div></div>`).join("");
+
+  const hasAny = !!(chatRows || peopleRows);
+  $("fwdBody").innerHTML =
+    `<div class="fwdHint">Gönderilecek mesaj: <b>${esc((m.icerik||"").slice(0,90))}</b></div>` +
+    (chatRows ? `<div class="fwdSec">Sohbetler</div>${chatRows}` : "") +
+    (peopleRows ? `<div class="fwdSec">Kişiler</div>${peopleRows}` : "") +
+    (hasAny ? "" : `<div class="emptyList">Hedef yok</div>`);
+
+  $("fwdBody").querySelectorAll("[data-fwd]").forEach(r=>{
+    r.addEventListener("click", ()=> doForward(r.dataset.fwd, null));
+  });
+  $("fwdBody").querySelectorAll("[data-fwduser]").forEach(r=>{
+    r.addEventListener("click", ()=> doForward(null, r.dataset.fwduser));
+  });
+  $("fwdOverlay").classList.remove("hidden");
+}
+
+async function doForward(chatId, otherUid){
+  const m = lastMsgs.find(z=>z.id===fwdMid);
+  if(!m) return;
+  $("fwdOverlay").classList.add("hidden");
+  fwdMid = null;
+  let info = null;
+  try{
+    if(!chatId){
+      chatId = await ensureDm(otherUid);
+      info = { grp:false, uyeler:[me.uid, otherUid].sort() };
+    }
+    await postToChat(chatId, m.icerik, { iletilendi:true }, info);
+    toast("Mesaj iletildi");
+  }catch(e){ toast("İletilemedi: "+e.message, true); }
+}
+$("fwdClose").addEventListener("click", ()=>{ $("fwdOverlay").classList.add("hidden"); fwdMid = null; });
 
 async function doDelete(mid, kind){
   const m = lastMsgs.find(z=>z.id===mid);
@@ -515,6 +660,16 @@ async function doDelete(mid, kind){
 
 (function bindMsgMenu(){
   const box = $("msgs");
+  box.addEventListener("click", e=>{
+    const q = e.target.closest(".msgQuote");
+    if(!q || !q.dataset.q) return;
+    e.stopPropagation();
+    const t = box.querySelector('.msg[data-mid="' + q.dataset.q + '"]');
+    if(!t){ toast("O mesaj artık görünmüyor"); return; }
+    t.scrollIntoView({ behavior:"smooth", block:"center" });
+    t.classList.add("hl");
+    setTimeout(()=> t.classList.remove("hl"), 1300);
+  });
   box.addEventListener("click", e=>{
     const b = e.target.closest("[data-more]");
     if(!b) return;
@@ -550,7 +705,15 @@ async function doDelete(mid, kind){
     if(Date.now() - menuGuard < 400) return;
     if(!e.target.closest("#msgMenu")) closeMsgMenu();
   });
-  document.addEventListener("keydown", e=>{ if(e.key === "Escape") closeMsgMenu(); });
+  document.addEventListener("keydown", e=>{
+    if(e.key !== "Escape") return;
+    closeMsgMenu();
+    if(!$("ctxBar").classList.contains("hidden")) cancelCtx();
+    if(!$("fwdOverlay").classList.contains("hidden")){
+      $("fwdOverlay").classList.add("hidden");
+      fwdMid = null;
+    }
+  });
 })();
 
 $("backBtn").addEventListener("click", ()=>{
@@ -606,34 +769,76 @@ setInterval(()=>{
   if(should !== typingSeen){ typingSeen = should; renderMsgsFromCache(); }
 }, 1200);
 
-/* --- gönder --- */
+/* --- gonder --- */
+function activeMembers(){
+  if(!active) return { grp:false, uyeler:[me.uid] };
+  if(active.type === "grup") return { grp:true, uyeler: active.uyeler || [] };
+  return { grp:false, uyeler: active.other ? [me.uid, active.other].sort() : [me.uid] };
+}
+
+async function postToChat(chatId, icerik, opts, infoOverride){
+  opts = opts || {};
+  let info = infoOverride;
+  if(!info && active && active.id === chatId) info = activeMembers();
+  if(!info){
+    const c = chats.find(x=>x.id===chatId);
+    if(c) info = { grp: c.tur === "grup", uyeler: c.uyeler || [] };
+  }
+  if(!info) info = { grp:false, uyeler:[me.uid] };
+
+  const ref = doc(db,"sohbetler",chatId);
+  const payload = {
+    icerik, yazan: me.uid, yazanAd: me.ad,
+    ts: Date.now(), zaman: serverTimestamp(), okundu:false, okuyan:[me.uid]
+  };
+  if(opts.yanit) payload.yanit = opts.yanit;
+  if(opts.iletilendi) payload.iletilendi = true;
+  await addDoc(collection(ref,"mesajlar"), payload);
+
+  const upd = {
+    sonMesaj: icerik, sonMesajYazar: me.uid, sonMesajYazarAd: me.ad,
+    sonMesajZaman: Date.now(), [`yaziyor.${me.uid}`]: 0
+  };
+  info.uyeler.forEach(u=>{
+    if(u !== me.uid) upd[`okunmamis.${u}`] = increment(1);
+  });
+  updateDoc(ref, upd).catch(()=>{});
+  const to = info.uyeler.filter(u=>u !== me.uid);
+  Notif.notify(me.ad, icerik, "chat_" + chatId, to);
+}
+
 async function send(){
   const text = $("input").value.trim();
   if(!text || !active) return;
-  const ref = doc(db,"sohbetler",active.id);
-  const grp = active.type === "grup";
   $("input").value = "";
   $("input").style.height = "auto";
-  try{
-    await addDoc(collection(ref,"mesajlar"), {
-      icerik: text, yazan: me.uid, yazanAd: me.ad,
-      ts: Date.now(), zaman: serverTimestamp(), okundu: false,
-      okuyan: [me.uid]
-    });
-    const upd = {
-      sonMesaj: text, sonMesajYazar: me.uid, sonMesajYazarAd: me.ad,
-      sonMesajZaman: Date.now(), [`yaziyor.${me.uid}`]: 0
-    };
-    if(grp){
-      (active.uyeler||[]).forEach(u=>{
-        if(u !== me.uid) upd[`okunmamis.${u}`] = increment(1);
+
+  if(editing){
+    const mid = editing.mid;
+    const m = lastMsgs.find(z=>z.id===mid);
+    cancelCtx();
+    if(!m || m.sistem) return;
+    if(Date.now() - (m.ts||0) > 15*60*1000){ toast("Düzenleme süresi doldu (15 dakika)", true); return; }
+    try{
+      await updateDoc(doc(db,"sohbetler",active.id,"mesajlar",mid), {
+        icerik: text, duzenlendi: Date.now()
       });
-    }else if(active.other){
-      upd[`okunmamis.${active.other}`] = increment(1);
-    }
-    updateDoc(ref, upd).catch(()=>{});
-    const to = grp ? (active.uyeler||[]) : (active.other ? [active.other] : []);
-    Notif.notify(me.ad, text, "chat_" + active.id, to);
+      const i = lastMsgs.findIndex(z=>z.id===mid);
+      if(i >= 0) lastMsgs[i] = { ...lastMsgs[i], icerik: text, duzenlendi: Date.now() };
+      const c = chats.find(x=>x.id===active.id);
+      if(c && c.sonMesaj === m.icerik){
+        updateDoc(doc(db,"sohbetler",active.id), { sonMesaj: text }).catch(()=>{});
+      }
+      renderMsgsFromCache();
+      toast("Mesaj düzenlendi");
+    }catch(e){ toast("Düzenlenemedi: "+e.message, true); }
+    return;
+  }
+
+  const y = replyTo;
+  cancelCtx();
+  try{
+    await postToChat(active.id, text, y ? { yanit: { mid:y.mid, yazan:y.yazan, ad:y.ad, ozet:y.ozet } } : {});
   }catch(e){ toast("Gönderilemedi: "+e.message, true); }
 }
 $("sendBtn").addEventListener("click", send);

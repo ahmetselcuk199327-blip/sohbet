@@ -216,8 +216,7 @@
     border-radius:20px;margin:10px 0}
 
   .composer{display:flex;gap:11px;align-items:flex-end;padding:12px 14px;background:var(--panel);
-    border-top:1px solid var(--line)}
-  .composer textarea{flex:1;resize:none;max-height:130px;padding:13px 17px;background:#0e131a;
+    border-top:1px solid var(--line)}  .composer textarea{flex:1;resize:none;max-height:130px;padding:13px 17px;background:#0e131a;
     border:1px solid var(--line);border-radius:22px;color:var(--txt);font-size:15px;outline:none;
     line-height:1.45;transition:.16s;min-height:46px}
   .composer textarea::placeholder{color:#5f6b7a}
@@ -227,6 +226,38 @@
     box-shadow:0 8px 20px rgba(13,189,139,.3)}
   .sendBtn:hover{transform:translateY(-1px) scale(1.04);filter:brightness(1.06)}
   .sendBtn:active{transform:none}
+
+  /* ---------- YANITLA / ILET / DUZENLE ---------- */
+  .composerWrap{background:var(--panel);border-top:1px solid var(--line)}
+  .composerWrap .composer{border-top:0;padding-top:10px}
+  .ctxBar{display:flex;gap:11px;align-items:flex-start;margin:11px 14px 0;padding:10px 12px;
+    background:var(--panel2);border:1px solid var(--line2);border-left:3px solid var(--acc);
+    border-radius:12px;animation:pop .14s ease}
+  .ctxBar.edit{border-left-color:var(--amber)}
+  .ctxIcon{font-size:17px;color:var(--acc);line-height:1.35;flex:none}
+  .ctxBar.edit .ctxIcon{color:var(--amber)}
+  .ctxMain{min-width:0;flex:1}
+  .ctxTop{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:3px}
+  .ctxTop b{font-size:12.5px;color:var(--acc);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ctxBar.edit .ctxTop b{color:var(--amber)}
+  .ctxClose{width:23px;height:23px;flex:none;border-radius:7px;font-size:13px;color:var(--muted);
+    background:var(--panel3);transition:.13s}
+  .ctxClose:hover{color:var(--txt);background:var(--line2)}
+  .ctxTxt{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.45}
+  .msgQuote{border-left:3px solid var(--acc);background:rgba(13,189,139,.14);border-radius:9px;
+    padding:5px 9px;margin-bottom:6px;cursor:pointer;font-size:12.5px;line-height:1.35;max-width:340px}
+  .msgQuote b{display:block;font-size:11.5px;color:var(--acc);margin-bottom:2px;letter-spacing:.1px}
+  .msgQuote span{display:block;color:rgba(255,255,255,.7);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .msgQuote:hover{background:rgba(13,189,139,.24)}
+  .msg.me .msgQuote{background:rgba(0,0,0,.26);border-left-color:#7ee2c2}
+  .msg.me .msgQuote b{color:#9ff0d6}
+  .msg.hl{box-shadow:0 0 0 2px var(--acc), var(--sh-1)}
+  .ed{font-style:italic;opacity:.72}
+  .fwdHint{font-size:12.5px;color:var(--muted);margin-bottom:12px;line-height:1.5}
+  .fwdSec{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;
+    font-weight:700;margin:16px 0 7px}
+  .fwdSec:first-child{margin-top:0}
 
   /* ---------- OVERLAY ---------- */
   .overlay{position:fixed;inset:0;z-index:50;background:rgba(5,8,11,.74);
@@ -486,9 +517,18 @@
         <input id="msgSearch" placeholder="Bu sohbette mesaj ara">
       </div>
       <div class="msgs" id="msgs"></div>
-      <div class="composer">
-        <textarea id="input" rows="1" placeholder="Mesaj yaz"></textarea>
-        <button class="sendBtn" id="sendBtn">➤</button>
+      <div class="composerWrap">
+        <div class="ctxBar hidden" id="ctxBar">
+          <div class="ctxIcon" id="ctxIcon">↩</div>
+          <div class="ctxMain">
+            <div class="ctxTop"><b id="ctxAd">—</b><button class="ctxClose" id="ctxClose" title="Vazgeç (Esc)">✕</button></div>
+            <div class="ctxTxt" id="ctxTxt"></div>
+          </div>
+        </div>
+        <div class="composer">
+          <textarea id="input" rows="1" placeholder="Mesaj yaz"></textarea>
+          <button class="sendBtn" id="sendBtn">➤</button>
+        </div>
       </div>
     </section>
   </main>
@@ -559,6 +599,16 @@
         <div class="profMetaBox"><b>Rol</b><span id="profMetaRole">—</span></div>
       </div>
     </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="fwdOverlay" style="align-items:stretch;padding:0">
+  <div class="adminWrap" style="max-width:540px">
+    <div class="adminHead">
+      <div class="adminTitle">➡ Mesajı ilet</div>
+      <button class="iconBtn" id="fwdClose" title="Kapat">✕</button>
+    </div>
+    <div class="adminBody" id="fwdBody"></div>
   </div>
 </div>
 
