@@ -104,6 +104,8 @@ function startApp(){
   $("meName").textContent = me.ad;
   $("meAlias").textContent = `@${me.uid}:nexus`;
   if(me.rol === "admin") $("adminBtn").classList.remove("hidden");
+  Notif.refreshBtn();
+  Notif.since = Date.now();
 
   setInterval(()=>{
     updateDoc(doc(db,"kullanicilar",me.uid), { sonGorulme: Date.now(), cevrimici: true }).catch(()=>{});
@@ -130,6 +132,7 @@ function startApp(){
         updateDoc(doc(db,"sohbetler",active.id), { [`okunmamis.${me.uid}`]: 0 }).catch(()=>{});
       }
     }
+    chats.forEach(c=> Notif.chat(c));
   }, e => toast("Sohbetler yüklenemedi: "+e.message, true));
 
   onSnapshot(query(collection(db,"aramalar"), where("aranan","==", me.uid)), snap=>{
@@ -378,7 +381,8 @@ function tickHtml(m, mine){
 function renderMsgs(msgs){
   const box = $("msgs");
   const term = trLow($("msgSearch").value.trim());
-  const shown = term ? msgs.filter(m=>trLow(m.icerik||"").includes(term)) : msgs;
+  const visible = msgs.filter(m=> (m.silinen||[]).indexOf(me.uid) < 0);
+  const shown = term ? visible.filter(m=>trLow(m.icerik||"").includes(term)) : visible;
   const grp = active && active.type === "grup";
   let html = "", lastDay = "";
 
@@ -396,7 +400,8 @@ function renderMsgs(msgs){
     const meta = mine
       ? `<span class="msgMeta">${hhmm(t)} ${tickHtml(m, mine)}</span>`
       : `<span class="msgMeta">${hhmm(t)}</span>`;
-    html += `<div class="msg ${mine?"me":"them"}">${who}${highlight(m.icerik, term)}${meta}</div>`;
+    html += `<div class="msg ${mine?"me":"them"}" data-mid="${m.id}">${who}${highlight(m.icerik, term)}${meta}`
+      + `<button class="msgMore" data-more="${m.id}" title="Mesaj işlemleri">⋮</button></div>`;
   });
 
   if(!shown.length){
@@ -410,6 +415,102 @@ function renderMsgs(msgs){
 }
 
 function renderMsgsFromCache(){ renderMsgs(lastMsgs); }
+
+/* --- mesaj silme menusu --- */
+let menuGuard = 0;
+function closeMsgMenu(){ const m = $("msgMenu"); if(m) m.classList.add("hidden"); }
+
+function openMsgMenu(mid, x, y){
+  const m = lastMsgs.find(z=>z.id===mid);
+  if(!m || !active) return;
+  if((m.silinen||[]).indexOf(me.uid) >= 0) return;
+  const mine = m.yazan === me.uid;
+  const isAdmin = me.rol === "admin";
+  const items = [{ k:"mine", i:"🙈", t:"Benden sil" }];
+  if(mine || isAdmin) items.push({ k:"all", i:"🗑", t:"Herkesten sil", d:true });
+
+  const menu = $("msgMenu");
+  menu.innerHTML = items.map(it=>
+    `<button class="msgMenuItem${it.d?" danger":""}" data-mi="${it.k}"><span class="mi">${it.i}</span>${it.t}</button>`
+  ).join("");
+  menu.classList.remove("hidden");
+  menuGuard = Date.now();
+
+  const r = menu.getBoundingClientRect();
+  const px = Math.max(8, Math.min(x, window.innerWidth - r.width - 8));
+  const py = Math.max(8, Math.min(y, window.innerHeight - r.height - 8));
+  menu.style.left = px + "px";
+  menu.style.top = py + "px";
+
+  menu.querySelectorAll("[data-mi]").forEach(b=>{
+    b.addEventListener("click", e=>{
+      e.stopPropagation();
+      const k = b.dataset.mi;
+      closeMsgMenu();
+      doDelete(mid, k);
+    });
+  });
+}
+
+async function doDelete(mid, kind){
+  const m = lastMsgs.find(z=>z.id===mid);
+  if(!m || !active) return;
+  const ref = doc(db,"sohbetler",active.id,"mesajlar",mid);
+  try{
+    if(kind === "mine"){
+      await updateDoc(ref, { silinen: arrayUnion(me.uid) });
+      toast("Mesaj senden silindi");
+    }else{
+      await deleteDoc(ref);
+      const c = chats.find(z=>z.id===active.id);
+      if(c && c.sonMesaj === m.icerik && c.sonMesajZaman === (m.ts||0)){
+        await updateDoc(doc(db,"sohbetler",active.id),
+          { sonMesaj:"", sonMesajYazar:"", sonMesajYazarAd:"", sonMesajZaman:0 }).catch(()=>{});
+      }
+      toast("Mesaj herkesten silindi");
+    }
+  }catch(e){ toast("Silinemedi: "+e.message, true); }
+}
+
+(function bindMsgMenu(){
+  const box = $("msgs");
+  box.addEventListener("click", e=>{
+    const b = e.target.closest("[data-more]");
+    if(!b) return;
+    e.stopPropagation();
+    const r = b.getBoundingClientRect();
+    openMsgMenu(b.dataset.more, r.left, r.bottom + 6);
+  });
+  box.addEventListener("contextmenu", e=>{
+    const msg = e.target.closest(".msg");
+    if(!msg || !msg.dataset.mid) return;
+    e.preventDefault();
+    openMsgMenu(msg.dataset.mid, e.clientX, e.clientY);
+  });
+  let lpTimer = null, sx = 0, sy = 0;
+  box.addEventListener("pointerdown", e=>{
+    const msg = e.target.closest(".msg");
+    if(!msg || !msg.dataset.mid || e.button === 2) return;
+    sx = e.clientX; sy = e.clientY;
+    clearTimeout(lpTimer);
+    lpTimer = setTimeout(()=>{
+      if(navigator.vibrate) try{ navigator.vibrate(15); }catch(err){}
+      openMsgMenu(msg.dataset.mid, sx, sy);
+    }, 450);
+  });
+  const cancel = ()=> clearTimeout(lpTimer);
+  box.addEventListener("pointerup", cancel);
+  box.addEventListener("pointercancel", cancel);
+  box.addEventListener("pointermove", e=>{
+    if(Math.abs(e.clientX-sx) > 12 || Math.abs(e.clientY-sy) > 12) cancel();
+  });
+  box.addEventListener("scroll", cancel, { passive:true });
+  document.addEventListener("click", e=>{
+    if(Date.now() - menuGuard < 400) return;
+    if(!e.target.closest("#msgMenu")) closeMsgMenu();
+  });
+  document.addEventListener("keydown", e=>{ if(e.key === "Escape") closeMsgMenu(); });
+})();
 
 $("backBtn").addEventListener("click", ()=>{
   document.body.classList.remove("inChat");
@@ -557,12 +658,90 @@ const Snd = (()=>{
     connected(){ tone(659.25,0.08,{vol:0.15,type:"triangle"}); tone(880,0.13,{vol:0.15,type:"triangle",delay:0.08}); },
     end(){ tone(659.25,0.11,{vol:0.14,type:"triangle"}); tone(440,0.24,{vol:0.14,type:"triangle",delay:0.1}); },
     fail(){ tone(311,0.15,{vol:0.13,type:"sawtooth"}); tone(207.65,0.3,{vol:0.12,type:"sawtooth",delay:0.15}); },
+    pop(){ tone(1046.5,0.055,{vol:0.055,type:"sine"}); tone(1568,0.08,{vol:0.035,type:"sine",delay:0.05}); },
     tick(){ tone(1180,0.045,{vol:0.05,type:"sine"}); }
   };
   function vibrate(p){ try{ if(navigator.vibrate) navigator.vibrate(p); }catch(e){} }
   document.addEventListener("pointerdown", ()=>{ const c = ac(); if(c && c.state === "suspended") c.resume(); }, { passive:true });
   return api;
 })();
+
+/* ===== BILDIRIMLER ===== */
+const FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230dbd8b'/%3E%3Ctext x='32' y='44' font-size='36' font-weight='800' text-anchor='middle' fill='%2304140f' font-family='sans-serif'%3EN%3C/text%3E%3C/svg%3E";
+
+const Notif = {
+  last: {},
+  since: 0,
+  supported(){ return typeof Notification !== "undefined"; },
+  granted(){ return this.supported() && Notification.permission === "granted"; },
+  refreshBtn(){
+    const b = $("notifBtn");
+    if(!b) return;
+    b.classList.remove("notifBtnOn","notifBtnOff");
+    if(this.granted()){ b.classList.add("notifBtnOn"); b.title = "Bildirimler açık"; }
+    else if(this.supported() && Notification.permission === "denied"){
+      b.classList.add("notifBtnOff"); b.title = "Bildirimler engellendi — adres çubuğundaki kilit simgesinden aç";
+    }else{ b.title = "Bildirimleri aç"; }
+  },
+  async ask(){
+    if(!this.supported()){ toast("Bu tarayıcı bildirim desteklemiyor", true); return; }
+    if(Notification.permission === "granted"){ this.refreshBtn(); toast("Bildirimler zaten açık"); return; }
+    if(Notification.permission === "denied"){
+      this.refreshBtn();
+      toast("Bildirim engelli — adres çubuğundaki kilit/izin simgesinden açman gerek", true);
+      return;
+    }
+    try{
+      const p = await Notification.requestPermission();
+      this.refreshBtn();
+      if(p === "granted"){
+        this.push("Bildirimler açık", "Yeni mesaj ve aramalarda seni haberdar edeceğim");
+        toast("Bildirimler açıldı");
+      }else{ toast("Bildirim izni verilmedi", true); }
+    }catch(e){ toast("İzin alınamadı: "+e.message, true); }
+  },
+  push(title, body, opts){
+    if(!this.granted()) return;
+    opts = opts || {};
+    try{
+      const n = new Notification(title, { body, icon: FAVICON, badge: FAVICON, tag: opts.tag, renotify: false });
+      n.onclick = ()=>{ try{ window.focus(); }catch(e){} if(opts.onClick) opts.onClick(); n.close(); };
+    }catch(e){}
+  },
+  open(c){
+    try{
+      document.body.classList.remove("inChat");
+      activeTab = "chats";
+      document.querySelectorAll(".sideTab").forEach(x=> x.classList.toggle("on", x.dataset.tab === "chats"));
+      renderSide();
+      if(isGrup(c)) openGroupChat(c.id);
+      else openChat(c.uyeler.find(u=>u!==me.uid));
+    }catch(e){}
+  },
+  chat(c){
+    const ts = c.sonMesajZaman || 0;
+    if(!ts) return;
+    if((this.last[c.id] || 0) >= ts) return;
+    this.last[c.id] = ts;
+    if(ts <= this.since) return;
+    if(c.sonMesajYazar === me.uid) return;
+    const viewing = active && active.id === c.id;
+    if(viewing && !document.hidden) return;
+    const title = isGrup(c) ? (c.grupAd || "Grup")
+      : ((c.uyelerAd && c.uyelerAd[c.uyeler.find(u=>u!==me.uid)]) || "Yeni mesaj");
+    const body = (isGrup(c) && c.sonMesajYazarAd ? c.sonMesajYazarAd + ": " : "") + (c.sonMesaj || "");
+    Snd.pop();
+    this.push(title, body, { tag: "chat_" + c.id, onClick: ()=> this.open(c) });
+  },
+  call(d){
+    Snd.pop();
+    this.push(d.arayanAd, "Sesli arama isteği gönderiyor", { tag: "call", onClick: ()=>{
+      try{ window.focus(); }catch(e){}
+    }});
+  }
+};
+
+$("notifBtn").addEventListener("click", ()=> Notif.ask());
 
 /* ===== SESLİ ARAMA (WebRTC) ===== */
 let call = null;
@@ -582,6 +761,7 @@ function showRing(d){
   $("ringAlias").textContent = `@${d.arayan}:nexus`;
   $("ringOverlay").classList.remove("hidden");
   Snd.ringtone();
+  Notif.call(d);
 }
 
 $("ringReject").addEventListener("click", async ()=>{
@@ -601,7 +781,7 @@ $("ringAccept").addEventListener("click", async ()=>{
   $("ringOverlay").classList.add("hidden");
   try{
     const local = await navigator.mediaDevices.getUserMedia({ audio:true });
-    call = { id:d.id, role:"callee", local, muted:false, step:"wait-offer", connectedAt:0 };
+    call = { id:d.id, role:"callee", local, muted:false, step:"wait-offer", connectedAt:0, peer: d.arayan };
     await updateDoc(doc(db,"aramalar",d.id), { durum:"kabul", kabulZaman: Date.now() });
     showCallOverlay(d.arayanAd, d.arayan, "Bağlanıyor…");
     Snd.connecting();
@@ -625,7 +805,7 @@ $("callBtn").addEventListener("click", async ()=>{
       aranan: active.other, arananAd: active.otherAd,
       durum: "zil", olusturuldu: Date.now()
     });
-    showCallOverlay(active.otherAd, active.other, "Zil çalıyor…");
+    showCallOverlay(active.otherAd, active.other, "Aranıyor…");
     Snd.ringback();
     listenCandidates(id);
     setTimeout(()=>{ if(call && call.id===id && call.step==="wait-accept") endCall("cevapsiz"); }, 45000);
@@ -770,6 +950,28 @@ $("muteBtn").addEventListener("click", ()=>{
 
 $("endBtn").addEventListener("click", ()=> endCall("ben-bitirdim"));
 
+function fmtDur(ms){
+  const s = Math.max(0, Math.floor(ms/1000));
+  return String(Math.floor(s/60)).padStart(2,"0") + ":" + String(s%60).padStart(2,"0");
+}
+
+function writeCallLog(c, why){
+  const peer = c.peer || c.other;
+  if(!peer) return;
+  const chatId = [me.uid, peer].sort().join("~");
+  const sure = c.connectedAt ? fmtDur(Date.now() - c.connectedAt) : "";
+  const text = why === "cevapsiz" ? "📞 Cevapsız arama"
+    : why === "ret" ? "📞 Arama reddedildi"
+    : why === "mesgul" ? "📞 Karşı taraf meşgul"
+    : why === "baglanamadi" ? "📞 Bağlanılamadı"
+    : sure ? "📞 Sesli arama · " + sure
+    : "📞 Arama";
+  addDoc(collection(doc(db,"sohbetler",chatId),"mesajlar"), {
+    icerik: text, sistem: true, yazan: me.uid, yazanAd: me.ad,
+    ts: Date.now(), zaman: serverTimestamp()
+  }).catch(()=>{});
+}
+
 function endCall(why){
   if(!call) return;
   const c = call;
@@ -787,6 +989,7 @@ function endCall(why){
   $("muteBtn").classList.remove("off");
 
   const ref = doc(db,"aramalar",c.id);
+  if(c.role === "caller") writeCallLog(c, why);
   getDoc(ref).then(snap=>{
     if(!snap.exists()) return;
     const d = snap.data();

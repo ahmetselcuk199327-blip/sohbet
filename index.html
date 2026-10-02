@@ -241,6 +241,36 @@
   .rowGrp{display:none}
   .gIco{font-size:19px;line-height:1}
 
+  .msgMore{position:absolute;top:-1px;width:22px;height:20px;border-radius:6px;display:grid;
+    place-items:center;font-size:15px;line-height:1;color:var(--muted);opacity:0;transition:.15s;
+    background:var(--panel3);border:1px solid var(--line)}
+  .msg:hover .msgMore{opacity:1}
+  .msgMore:hover{color:var(--txt);border-color:var(--acc)}
+  .msg.me .msgMore{left:-27px}
+  .msg.them .msgMore{right:-27px}
+  @media (hover:none){ .msgMore{opacity:.6} }
+
+  .msgMenu{position:fixed;z-index:90;min-width:170px;background:var(--panel3);border:1px solid var(--line);
+    border-radius:12px;padding:5px;box-shadow:0 14px 40px rgba(0,0,0,.55);animation:pop .12s ease}
+  .msgMenuItem{display:flex;width:100%;align-items:center;gap:9px;padding:10px 12px;border-radius:8px;
+    font-size:14px;color:var(--txt);text-align:left;transition:.12s}
+  .msgMenuItem:hover{background:var(--panel2)}
+  .msgMenuItem.danger{color:#ff8b98}
+  .msgMenuItem .mi{font-size:15px;opacity:.85}
+
+  .notifBtnOff{filter:grayscale(1);opacity:.55}
+  .notifBtnOn{color:var(--acc);border-color:rgba(13,189,139,.55)}
+
+  .cBtn.phone{font-size:27px}
+  .ringLabel{font-size:12.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--acc);
+    font-weight:800;margin-bottom:16px}
+  .callBox .cBtn.red small, .callBox .cBtn.green small{color:var(--muted)}
+  .cBtn .ph{display:inline-block;line-height:1}
+  .cBtn.phone .ph{transform:rotate(135deg)}
+  .cBtn.green.phone .ph{transform:rotate(135deg)}
+  .cBtn .mi2{display:inline-block;line-height:1}
+  .cBtn.grey.off .mi2{filter:grayscale(1);opacity:.7}
+
   .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(90px);
     background:var(--panel3);border:1px solid var(--line);color:var(--txt);padding:11px 18px;
     border-radius:11px;font-size:14px;opacity:0;transition:.25s;z-index:99;max-width:90vw;text-align:center}
@@ -291,6 +321,7 @@
         <div style="display:flex;gap:8px">
           <button class="iconBtn hidden" id="adminBtn" title="Yönetim paneli">⚙</button>
           <button class="iconBtn" id="newGroupBtn" title="Yeni grup">👥</button>
+          <button class="iconBtn" id="notifBtn" title="Bildirimleri aç">🔔</button>
           <button class="iconBtn" id="newChatBtn" title="Yeni sohbet">＋</button>
           <button class="iconBtn" id="logoutBtn" title="Çıkış">⎋</button>
         </div>
@@ -341,13 +372,14 @@
 
 <div class="overlay hidden" id="ringOverlay">
   <div class="callBox">
+    <div class="ringLabel">Gelen sesli arama</div>
     <div class="callAvatar ringing" id="ringAvatar" style="background:#0dbd8b">?</div>
     <div class="callName" id="ringName">—</div>
     <div class="callAlias" id="ringAlias">@:nexus</div>
-    <div class="callStatus">Sesli arama · gelen</div>
+    <div class="callStatus">Nexus sesli arama</div>
     <div class="callActions spaced">
-      <button class="cBtn red" id="ringReject" title="Reddet">✆<small>Reddet</small></button>
-      <button class="cBtn green" id="ringAccept" title="Kabul et">✆<small>Kabul</small></button>
+      <button class="cBtn red phone" id="ringReject" title="Reddet"><span class="ph">📞</span><small>Reddet</small></button>
+      <button class="cBtn green phone" id="ringAccept" title="Kabul et"><span class="ph">📞</span><small>Kabul et</small></button>
     </div>
   </div>
 </div>
@@ -357,11 +389,11 @@
     <div class="callAvatar" id="callAvatar" style="background:#0dbd8b">?</div>
     <div class="callName" id="callName">—</div>
     <div class="callAlias" id="callAlias">@:nexus</div>
-    <div class="callStatus" id="callStatus">Zil çalıyor…</div>
+    <div class="callStatus" id="callStatus">Aranıyor…</div>
     <div class="callTimer" id="callTimer"></div>
     <div class="callActions">
-      <button class="cBtn grey" id="muteBtn" title="Mikrofon">🎙<small>Mikrofon</small></button>
-      <button class="cBtn red" id="endBtn" title="Sonlandır">✆<small>Kapat</small></button>
+      <button class="cBtn grey" id="muteBtn" title="Mikrofonu kapat"><span class="mi2">🎙</span><small>Mikrofon</small></button>
+      <button class="cBtn red phone" id="endBtn" title="Görüşmeyi sonlandır"><span class="ph">📞</span><small>Kapat</small></button>
     </div>
   </div>
 </div>
@@ -415,6 +447,7 @@
 </div>
 
 <audio id="remoteAudio" autoplay playsinline></audio>
+<div class="msgMenu hidden" id="msgMenu"></div>
 <div class="toast" id="toast"></div>
 
 <script type="module" src="app.js"></script>
