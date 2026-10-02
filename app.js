@@ -50,6 +50,52 @@ let lastMsgs = [];
 let activeTab = "chats";
 let typingSeen = 0;
 
+/* ===== PROFIL YARDIMCILARI ===== */
+function initialsOf(name){
+  const s = String(name == null ? "" : name).trim();
+  return esc((s[0] || "?").toLocaleUpperCase("tr"));
+}
+function userBy(uid){ return users.find(u=>u.uid===uid) || null; }
+function adOf(uid, fallback){ const u = userBy(uid); return (u && u.ad) || fallback || uid; }
+function fotoOf(uid){ const u = userBy(uid); return (u && u.foto) || ""; }
+function hakkindaOf(uid){ const u = userBy(uid); return (u && u.hakkinda) || ""; }
+
+function avatarHtml(o){
+  o = o || {};
+  const cls = "avatar" + (o.cls ? " " + o.cls : "");
+  const inner = o.icon
+    ? `<span class="gIco">${o.icon}</span>`
+    : o.photo
+      ? `<img class="avImg" src="${o.photo}" alt="">`
+      : `<span>${initialsOf(o.ad)}</span>`;
+  return `<div class="${cls}" style="background:${colorFor(o.uid || o.ad || "?")}">${inner}${o.dot ? '<span class="dot"></span>' : ""}</div>`;
+}
+function paintAvatar(el, o){
+  if(!el) return;
+  o = o || {};
+  el.style.background = colorFor(o.uid || o.ad || "?");
+  if(o.icon) el.innerHTML = `<span class="gIco">${o.icon}</span>`;
+  else if(o.photo) el.innerHTML = `<img class="avImg" src="${o.photo}" alt="">`;
+  else el.innerHTML = `<span>${initialsOf(o.ad)}</span>`;
+  el.style.fontSize = o.icon ? "17px" : "";
+}
+function renderMeBox(){
+  if(!me) return;
+  const u = userBy(me.uid);
+  if(u){
+    if(u.ad) me.ad = u.ad;
+    if(u.foto !== undefined) me.foto = u.foto;
+    if(u.hakkinda !== undefined) me.hakkinda = u.hakkinda;
+  }
+  paintAvatar($("meAvatar"), { uid: me.uid, ad: me.ad, photo: me.foto || "" });
+  $("meName").textContent = me.ad;
+  $("meAlias").textContent = `@${me.uid}:nexus`;
+}
+function syncActiveNames(){
+  if(!active) return;
+  if(active.type === "dm") active.otherAd = adOf(active.other, active.otherAd);
+}
+
 /* ===== LOGIN ===== */
 const nickEl = $("nick"), pinEl = $("pin");
 nickEl.addEventListener("input", ()=>{
@@ -76,8 +122,8 @@ async function doLogin(){
       }
       me = { uid, ad: snap.data().ad, rol: snap.data().rol || "user" };
     }else{
-      me = { uid, ad: nickEl.value.trim(), rol: "user" };
-      await setDoc(ref, { ad: me.ad, pinHash: hash, sonGorulme: Date.now(), cevrimici: true, kayit: Date.now(), rol: "user" });
+      me = { uid, ad: nickEl.value.trim(), rol: "user", foto:"", hakkinda:"" };
+      await setDoc(ref, { ad: me.ad, pinHash: hash, sonGorulme: Date.now(), cevrimici: true, kayit: Date.now(), rol: "user", foto:"", hakkinda:"" });
     }
     localStorage.setItem("nexus_session", JSON.stringify({ uid: me.uid, ad: me.ad, hash, rol: me.rol }));
     startApp();
@@ -99,10 +145,7 @@ function tryRestore(){
 function startApp(){
   $("loginView").classList.add("hidden");
   $("appView").classList.remove("hidden");
-  $("meAvatar").textContent = (me.ad[0]||"?").toLocaleUpperCase("tr");
-  $("meAvatar").style.background = colorFor(me.uid);
-  $("meName").textContent = me.ad;
-  $("meAlias").textContent = `@${me.uid}:nexus`;
+  renderMeBox();
   if(me.rol === "admin") $("adminBtn").classList.remove("hidden");
   Notif.refreshBtn();
   Notif.since = Date.now();
@@ -117,6 +160,8 @@ function startApp(){
 
   onSnapshot(collection(db,"kullanicilar"), snap=>{
     users = snap.docs.map(d=>({ uid:d.id, ...d.data() }));
+    renderMeBox();
+    syncActiveNames();
     renderSide();
     renderChatHeader();
     if(!$("groupOverlay").classList.contains("hidden")) renderGroupPicker();
@@ -215,21 +260,20 @@ function renderSide(){
     const rows = chats.map(c=>{
       const grp = isGrup(c);
       const other = grp ? null : c.uyeler.find(u=>u!==me.uid);
-      const name = grp ? (c.grupAd || "Adsız grup") : ((c.uyelerAd && c.uyelerAd[other]) || other);
+      const name = grp ? (c.grupAd || "Adsız grup")
+        : adOf(other, (c.uyelerAd && c.uyelerAd[other]) || other);
       return { c, other, name, grp };
     }).filter(r => !term || trLow(r.name).includes(term) || trLow(r.c.sonMesaj||"").includes(term));
 
     html = rows.length ? rows.map(({c,other,name,grp})=>{
-      const u = grp ? null : (users.find(x=>x.uid===other) || {});
+      const u = grp ? null : userBy(other);
       const p = u ? presenceOf(u) : { txt:"", live:false };
       const unread = (c.okunmamis && c.okunmamis[me.uid]) || 0;
       const time = c.sonMesajZaman ? hhmm(c.sonMesajZaman) : "";
       const on = active && active.id === c.id ? " on" : "";
-      const bg = grp ? colorFor(c.id) : colorFor(other);
       const avatar = grp
-        ? `<div class="avatar" style="background:${bg}"><span class="gIco">👥</span></div>`
-        : `<div class="avatar" style="background:${bg}">${esc((name[0]||"?").toLocaleUpperCase("tr"))}
-            ${p.live?'<span class="dot"></span>':''}</div>`;
+        ? avatarHtml({ uid: c.id, icon: "👥" })
+        : avatarHtml({ uid: other, ad: name, photo: fotoOf(other), dot: p.live });
       const sub = grp ? `${(c.uyeler||[]).length} üye` : "";
       return `<div class="row${on}" ${grp?`data-cid="${c.id}"`:`data-chat="${other}"`}>
         ${avatar}
@@ -246,8 +290,7 @@ function renderSide(){
     html = rows.length ? rows.map(u=>{
       const p = presenceOf(u);
       return `<div class="row" data-chat="${u.uid}">
-        <div class="avatar" style="background:${colorFor(u.uid)}">${esc((u.ad[0]||"?").toLocaleUpperCase("tr"))}
-          ${p.live?'<span class="dot"></span>':''}</div>
+        ${avatarHtml({ uid: u.uid, ad: u.ad, photo: fotoOf(u.uid), dot: p.live })}
         <div class="rowMain">
           <div class="rowLine1"><span class="rowName">${esc(u.ad)}</span></div>
           <div class="rowLine2"><span class="rowLast" style="color:${p.live?'var(--acc)':'var(--muted)'}">${p.live?"● ":""}${esc(p.txt)}</span>
@@ -320,20 +363,17 @@ function renderChatHeader(){
     if(c){ active.grupAd = c.grupAd || active.grupAd; active.uyeler = c.uyeler || active.uyeler; }
     const n = (active.uyeler||[]).length;
     $("chatName").textContent = active.grupAd;
-    $("chatAvatar").innerHTML = "👥";
-    $("chatAvatar").style.background = colorFor(active.id);
-    $("chatAvatar").style.fontSize = "17px";
+    paintAvatar($("chatAvatar"), { uid: active.id, icon: "👥" });
     const st = $("chatStatus");
     st.className = "chatStatus";
     st.textContent = `${n} üye · grup sohbeti`;
     return;
   }
-  const u = users.find(x=>x.uid===active.other);
+  active.otherAd = adOf(active.other, active.otherAd);
+  const u = userBy(active.other);
   const p = u ? presenceOf(u) : { txt:"—", live:false };
   $("chatName").textContent = active.otherAd;
-  $("chatAvatar").textContent = (active.otherAd[0]||"?").toLocaleUpperCase("tr");
-  $("chatAvatar").style.background = colorFor(active.other);
-  $("chatAvatar").style.fontSize = "";
+  paintAvatar($("chatAvatar"), { uid: active.other, ad: active.otherAd, photo: fotoOf(active.other) });
   const st = $("chatStatus");
   st.className = "chatStatus" + (p.live ? " live" : "");
   st.textContent = p.txt;
@@ -817,8 +857,8 @@ const RTC_CFG = { iceServers: [
 
 function showRing(d){
   ringCall = d;
-  $("ringAvatar").textContent = (d.arayanAd[0]||"?").toLocaleUpperCase("tr");
-  $("ringAvatar").style.background = colorFor(d.arayan);
+  paintAvatar($("ringAvatar"), { uid: d.arayan, ad: d.arayanAd, photo: fotoOf(d.arayan) });
+  $("ringAvatar").classList.add("ringing");
   $("ringName").textContent = d.arayanAd;
   $("ringAlias").textContent = `@${d.arayan}:nexus`;
   $("ringOverlay").classList.remove("hidden");
@@ -876,8 +916,7 @@ $("callBtn").addEventListener("click", async ()=>{
 });
 
 function showCallOverlay(name, uid, status){
-  $("callAvatar").textContent = (name[0]||"?").toLocaleUpperCase("tr");
-  $("callAvatar").style.background = colorFor(uid);
+  paintAvatar($("callAvatar"), { uid, ad: name, photo: fotoOf(uid) });
   $("callAvatar").classList.add("ringing");
   $("callName").textContent = name;
   $("callAlias").textContent = `@${uid}:nexus`;
@@ -1110,8 +1149,7 @@ function renderGroupPicker(){
     const p = presenceOf(u);
     const on = gSelected.has(u.uid) ? " picked" : "";
     return `<div class="row${on}" data-gu="${u.uid}">
-      <div class="avatar" style="background:${colorFor(u.uid)}">${esc((u.ad[0]||"?").toLocaleUpperCase("tr"))}
-        ${p.live?'<span class="dot"></span>':''}</div>
+      ${avatarHtml({ uid: u.uid, ad: u.ad, photo: fotoOf(u.uid), dot: p.live })}
       <div class="rowMain">
         <div class="rowLine1"><span class="rowName">${esc(u.ad)}</span></div>
         <div class="rowLine2"><span class="rowLast">@${u.uid} · ${esc(p.live?"çevrimiçi":"çevrimdışı")}</span></div>
@@ -1177,12 +1215,11 @@ function openGroupInfo(){
   const yonetici = c.yonetici || [];
 
   const rows = uyeler.map(u=>{
-    const ad = (c.uyelerAd && c.uyelerAd[u]) || (users.find(x=>x.uid===u)||{}).ad || u;
+    const ad = adOf(u, (c.uyelerAd && c.uyelerAd[u]) || u);
     const role = u === kurucu ? "kurucu" : (yonetici.includes(u) ? "yönetici" : "üye");
-    const p = presenceOf(users.find(x=>x.uid===u) || {});
+    const p = presenceOf(userBy(u) || {});
     return `<div class="giRow">
-      <div class="avatar sm" style="background:${colorFor(u)}">${esc((ad[0]||"?").toLocaleUpperCase("tr"))}
-        ${p.live?'<span class="dot"></span>':''}</div>
+      ${avatarHtml({ uid: u, ad, photo: fotoOf(u), dot: p.live, cls: "sm" })}
       <div class="rowMain">
         <div class="rowName">${esc(ad)}${u===me.uid?' <span class="gMe">(sen)</span>':""}</div>
         <div class="rowLast">@${u}</div>
@@ -1259,8 +1296,7 @@ function renderAdmin(){
       const rol = u.rol === "admin" ? "admin" : "user";
       const isMe = u.uid === me.uid;
       return `<div class="aRow">
-        <div class="avatar" style="background:${colorFor(u.uid)}">${esc((u.ad[0]||"?").toLocaleUpperCase("tr"))}
-          ${online?'<span class="dot"></span>':''}</div>
+        ${avatarHtml({ uid: u.uid, ad: u.ad, photo: fotoOf(u.uid), dot: online })}
         <div class="aRowMain">
           <div class="aRowName">${esc(u.ad)} <span class="aTag ${rol}">${rol}</span></div>
           <div class="aRowSub">@${u.uid}:nexus · ${online?"çevrimiçi":"çevrimdışı"}</div>
@@ -1335,6 +1371,149 @@ function renderAdmin(){
     }, ()=>{ body.innerHTML = `<div class="aEmpty">Yüklenemedi</div>`; });
   }
 }
+
+/* ===== PROFIL ===== */
+function shrinkImage(file, max, quality){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    const fail = e => { try{ URL.revokeObjectURL(url); }catch(x){} reject(e instanceof Error ? e : new Error("görsel açılamadı")); };
+    img.onload = ()=>{
+      try{
+        const iw = img.width || 1, ih = img.height || 1;
+        const scale = Math.min(1, max / Math.max(iw, ih));
+        const w = Math.max(1, Math.round(iw * scale));
+        const h = Math.max(1, Math.round(ih * scale));
+        const cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        const cx = cv.getContext("2d");
+        cx.imageSmoothingEnabled = true;
+        cx.imageSmoothingQuality = "high";
+        cx.drawImage(img, 0, 0, w, h);
+        try{ URL.revokeObjectURL(url); }catch(x){}
+        let out = "";
+        try{ out = cv.toDataURL("image/jpeg", quality); }catch(x){ out = ""; }
+        if(!out || out.length < 40) throw new Error("Görsel işlenemedi");
+        if(out.length > 900 * 1024){
+          try{ const alt = cv.toDataURL("image/webp", 0.82); if(alt.length && alt.length < out.length) out = alt; }catch(x){}
+        }
+        if(out.length > 960 * 1024) throw new Error("Görsel çok büyük, daha küçük bir görsel dene");
+        resolve(out);
+      }catch(e){ reject(e); }
+    };
+    img.onerror = ()=> fail(new Error("Görsel açılamadı"));
+    img.src = url;
+  });
+}
+
+function openProfile(){
+  if(!me) return;
+  const u = userBy(me.uid) || {};
+  renderMeBox();
+  paintAvatar($("profAvatar"), { uid: me.uid, ad: me.ad, photo: me.foto || "" });
+  $("profName").textContent = me.ad;
+  $("profAlias").textContent = `@${me.uid}:nexus`;
+  $("profMetaUid").textContent = `@${me.uid}:nexus`;
+  $("profMetaRole").textContent = me.rol === "admin" ? "Yönetici" : "Kullanıcı";
+  $("profNameInput").value = me.ad;
+  $("profBio").value = u.hakkinda || me.hakkinda || "";
+  $("profHint").textContent = me.foto
+    ? "Fotoğrafın kaydediliyor · 📷 değiştir, alttaki butonla kaldır"
+    : "Henüz profil fotoğrafın yok · 📷 ile bir görsel seç";
+  $("profileOverlay").classList.remove("hidden");
+  setTimeout(()=> $("profNameInput").focus(), 60);
+}
+function closeProfile(){ $("profileOverlay").classList.add("hidden"); }
+
+async function applyPhoto(file){
+  if(!file || !me) return;
+  if(!/^image\//.test(file.type)){ toast("Sadece görsel dosyası olabilir", true); return; }
+  if(file.size > 8 * 1024 * 1024){ toast("Dosya çok büyük (en fazla 8 MB)", true); return; }
+  const btn = $("profPhotoBtn");
+  btn.disabled = true;
+  $("profHint").textContent = "Fotoğraf işleniyor…";
+  try{
+    const dataUrl = await shrinkImage(file, 480, 0.86);
+    await updateDoc(doc(db,"kullanicilar",me.uid), { foto: dataUrl });
+    me.foto = dataUrl;
+    paintAvatar($("profAvatar"), { uid: me.uid, ad: me.ad, photo: dataUrl });
+    $("profHint").textContent = "Fotoğrafın kaydedildi 📷";
+    renderMeBox(); renderSide(); renderChatHeader();
+    toast("Profil fotoğrafın güncellendi");
+  }catch(e){
+    $("profHint").textContent = "Fotoğraf yüklenemedi";
+    toast("Yüklenemedi: " + (e && e.message ? e.message : e), true);
+  }finally{ btn.disabled = false; }
+}
+
+async function clearPhoto(){
+  if(!me || !me.foto) return;
+  const btn = $("profPhotoClear");
+  btn.disabled = true;
+  try{
+    await updateDoc(doc(db,"kullanicilar",me.uid), { foto: "" });
+    me.foto = "";
+    paintAvatar($("profAvatar"), { uid: me.uid, ad: me.ad });
+    $("profHint").textContent = "Henüz profil fotoğrafın yok · 📷 ile bir görsel seç";
+    renderMeBox(); renderSide(); renderChatHeader();
+    toast("Profil fotoğrafı kaldırıldı");
+  }catch(e){ toast("Kaldırılamadı: "+e.message, true); }
+  finally{ btn.disabled = false; }
+}
+
+async function saveProfile(){
+  if(!me) return;
+  const ad = $("profNameInput").value.trim().replace(/\s+/g," ");
+  const hakkinda = $("profBio").value.trim().slice(0,70);
+  if(ad.length < 2){ toast("Ad en az 2 karakter olmalı", true); return; }
+  if(ad.length > 24){ toast("Ad en fazla 24 karakter olmalı", true); return; }
+  const btn = $("profSave");
+  const eskiAd = me.ad;
+  btn.disabled = true; btn.textContent = "Kaydediliyor…";
+  try{
+    await updateDoc(doc(db,"kullanicilar",me.uid), { ad, hakkinda });
+    me.ad = ad; me.hakkinda = hakkinda;
+    const u = userBy(me.uid);
+    if(u){ u.ad = ad; u.hakkinda = hakkinda; }
+    renderMeBox();
+    if(ad !== eskiAd){
+      chats.forEach(c=>{ if(c.uyelerAd) c.uyelerAd[me.uid] = ad; });
+      const jobs = chats.filter(c => (c.uyeler||[]).indexOf(me.uid) >= 0)
+        .map(c => updateDoc(doc(db,"sohbetler",c.id), { [`uyelerAd.${me.uid}`]: ad }).catch(()=>{}));
+      lastMsgs.forEach(m=>{ if(m.yazan === me.uid && !m.sistem) m.yazanAd = ad; });
+      await Promise.all(jobs);
+    }
+    renderSide(); renderChatHeader();
+    $("profName").textContent = ad;
+    if(!$("ginfoOverlay").classList.contains("hidden")) openGroupInfo();
+    if(!$("adminOverlay").classList.contains("hidden")) renderAdmin();
+    renderMsgsFromCache();
+    toast("Profilin güncellendi");
+    closeProfile();
+  }catch(e){
+    toast("Kaydedilemedi: "+e.message, true);
+  }finally{
+    btn.disabled = false; btn.textContent = "Kaydet";
+  }
+}
+
+$("meBox").addEventListener("click", openProfile);
+$("profileClose").addEventListener("click", closeProfile);
+$("profPhotoBtn").addEventListener("click", ()=> $("photoInput").click());
+$("profPhotoPick").addEventListener("click", ()=> $("photoInput").click());
+$("photoInput").addEventListener("change", e=>{
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if(f) applyPhoto(f);
+});
+$("profPhotoClear").addEventListener("click", clearPhoto);
+$("profSave").addEventListener("click", saveProfile);
+$("profNameInput").addEventListener("keydown", e=>{ if(e.key === "Enter") saveProfile(); });
+$("profBio").addEventListener("keydown", e=>{ if(e.key === "Enter") saveProfile(); });
+$("profileOverlay").addEventListener("click", e=>{ if(e.target === $("profileOverlay")) closeProfile(); });
+document.addEventListener("keydown", e=>{
+  if(e.key === "Escape" && !$("profileOverlay").classList.contains("hidden")) closeProfile();
+});
 
 /* ===== SESSION RESTORE ===== */
 if(tryRestore()) startApp();
