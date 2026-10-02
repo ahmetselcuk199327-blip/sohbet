@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {
-  getFirestore, collection, doc, getDoc, setDoc, updateDoc, addDoc,
-  query, where, orderBy, onSnapshot, increment, serverTimestamp, writeBatch
+  getFirestore, collection, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
+  query, where, orderBy, onSnapshot, increment, serverTimestamp, writeBatch, getDocs
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -72,12 +72,12 @@ async function doLogin(){
       if(snap.data().pinHash !== hash){
         err.textContent = "PIN hatalı"; btn.disabled = false; btn.textContent = "Giriş yap"; return;
       }
-      me = { uid, ad: snap.data().ad };
+      me = { uid, ad: snap.data().ad, rol: snap.data().rol || "user" };
     }else{
-      me = { uid, ad: nickEl.value.trim() };
-      await setDoc(ref, { ad: me.ad, pinHash: hash, sonGorulme: Date.now(), cevrimici: true, kayit: Date.now() });
+      me = { uid, ad: nickEl.value.trim(), rol: "user" };
+      await setDoc(ref, { ad: me.ad, pinHash: hash, sonGorulme: Date.now(), cevrimici: true, kayit: Date.now(), rol: "user" });
     }
-    localStorage.setItem("nexus_session", JSON.stringify({ uid: me.uid, ad: me.ad, hash }));
+    localStorage.setItem("nexus_session", JSON.stringify({ uid: me.uid, ad: me.ad, hash, rol: me.rol }));
     startApp();
   }catch(e){
     err.textContent = "Giriş başarısız: " + e.message;
@@ -88,7 +88,7 @@ async function doLogin(){
 function tryRestore(){
   try{
     const s = JSON.parse(localStorage.getItem("nexus_session"));
-    if(s && s.uid && s.hash){ me = { uid: s.uid, ad: s.ad }; return true; }
+    if(s && s.uid && s.hash){ me = { uid: s.uid, ad: s.ad, rol: s.rol || "user" }; return true; }
   }catch(e){}
   return false;
 }
@@ -101,6 +101,7 @@ function startApp(){
   $("meAvatar").style.background = colorFor(me.uid);
   $("meName").textContent = me.ad;
   $("meAlias").textContent = `@${me.uid}:nexus`;
+  if(me.rol === "admin") $("adminBtn").classList.remove("hidden");
 
   setInterval(()=>{
     updateDoc(doc(db,"kullanicilar",me.uid), { sonGorulme: Date.now(), cevrimici: true }).catch(()=>{});
@@ -596,6 +597,115 @@ function endCall(why){
     else if(why === "baglanti-koptu") toast("Bağlantı koptu");
     else if(why === "karsi-kapatti") toast("Görüşme kapatıldı");
   }).catch(()=>{});
+}
+
+/* ===== ADMIN PANEL ===== */
+let adminTab = "users";
+let allChatsCache = [];
+let unsubAdminChats = null;
+
+$("adminBtn").addEventListener("click", ()=>{
+  if(!me || me.rol !== "admin") return;
+  $("adminOverlay").classList.remove("hidden");
+  renderAdmin();
+});
+$("adminClose").addEventListener("click", closeAdmin);
+document.querySelectorAll("[data-atab]").forEach(b=>{
+  b.addEventListener("click", ()=>{
+    document.querySelectorAll("[data-atab]").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on");
+    adminTab = b.dataset.atab;
+    renderAdmin();
+  });
+});
+
+function closeAdmin(){
+  $("adminOverlay").classList.add("hidden");
+  if(unsubAdminChats){ unsubAdminChats(); unsubAdminChats = null; }
+}
+
+function renderAdmin(){
+  const body = $("adminBody");
+  if(adminTab === "users"){
+    if(unsubAdminChats){ unsubAdminChats(); unsubAdminChats = null; }
+    body.innerHTML = users.length ? users.map(u=>{
+      const online = u.cevrimici && Date.now()-(u.sonGorulme||0) < 45000;
+      const rol = u.rol === "admin" ? "admin" : "user";
+      const isMe = u.uid === me.uid;
+      return `<div class="aRow">
+        <div class="avatar" style="background:${colorFor(u.uid)}">${esc((u.ad[0]||"?").toLocaleUpperCase("tr"))}
+          ${online?'<span class="dot"></span>':''}</div>
+        <div class="aRowMain">
+          <div class="aRowName">${esc(u.ad)} <span class="aTag ${rol}">${rol}</span></div>
+          <div class="aRowSub">@${u.uid}:nexus · ${online?"çevrimiçi":"çevrimdışı"}</div>
+        </div>
+        <button class="aDel" data-deluser="${u.uid}" ${isMe?"disabled":""}>Sil</button>
+      </div>`;
+    }).join("") : `<div class="aEmpty">Kayıtlı kullanıcı yok</div>`;
+
+    body.querySelectorAll("[data-deluser]").forEach(b=>{
+      b.addEventListener("click", async ()=>{
+        const uid = b.dataset.deluser;
+        if(uid === me.uid) return;
+        if(!confirm(`@${uid}:nexus kullanıcısı silinsin mi? Tüm sohbetleri de silinir.`)) return;
+        b.disabled = true;
+        try{
+          const snap = await getDocs(query(collection(db,"sohbetler"), where("uyeler","array-contains", uid)));
+          const batch = writeBatch(db);
+          snap.docs.forEach(d=> batch.delete(d.ref));
+          await batch.commit();
+          await deleteDoc(doc(db,"kullanicilar", uid));
+          toast("Kullanıcı silindi: @" + uid);
+        }catch(e){ toast("Silinemedi: "+e.message, true); b.disabled = false; }
+      });
+    });
+  }else{
+    body.innerHTML = `<div class="aEmpty">Sohbetler yükleniyor…</div>`;
+    if(unsubAdminChats) unsubAdminChats();
+    unsubAdminChats = onSnapshot(collection(db,"sohbetler"), async snap=>{
+      const chatDocs = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+      allChatsCache = chatDocs;
+      if(!chatDocs.length){
+        body.innerHTML = `<div class="aEmpty">Henüz sohbet yok</div>`;
+        return;
+      }
+      let html = "";
+      for(const c of chatDocs){
+        const names = c.uyeler.map(u=>`@${u}`).join(" ↔ ");
+        html += `<div class="aChatHead">${esc(names)}</div>`;
+        try{
+          const msnap = await getDocs(query(collection(db,"sohbetler",c.id,"mesajlar"), orderBy("ts","asc")));
+          if(!msnap.docs.length){
+            html += `<div class="aMsg"><span class="aMsgTxt" style="color:var(--muted)">Mesaj yok</span></div>`;
+          }
+          msnap.docs.forEach(md=>{
+            const m = md.data();
+            html += `<div class="aMsg">
+              <div class="aMsgTxt">
+                <div class="aMsgWho">${esc(m.yazanAd||m.yazan)}</div>
+                ${esc(m.icerik)}
+              </div>
+              <span class="aMsgTime">${m.ts?hhmm(m.ts):""}</span>
+              <button class="aMsgDel" data-delmsg="${c.id}|${md.id}" title="Mesajı sil">🗑</button>
+            </div>`;
+          });
+        }catch(e){
+          html += `<div class="aMsg"><span class="aMsgTxt" style="color:var(--red)">Yüklenemedi</span></div>`;
+        }
+      }
+      body.innerHTML = html;
+      body.querySelectorAll("[data-delmsg]").forEach(b=>{
+        b.addEventListener("click", async ()=>{
+          const [cid, mid] = b.dataset.delmsg.split("|");
+          if(!confirm("Bu mesaj kalıcı olarak silinsin mi?")) return;
+          try{
+            await deleteDoc(doc(db,"sohbetler",cid,"mesajlar",mid));
+            toast("Mesaj silindi");
+          }catch(e){ toast("Silinemedi: "+e.message, true); }
+        });
+      });
+    }, ()=>{ body.innerHTML = `<div class="aEmpty">Yüklenemedi</div>`; });
+  }
 }
 
 /* ===== SESSION RESTORE ===== */
