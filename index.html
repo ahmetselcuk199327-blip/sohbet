@@ -400,6 +400,40 @@
   .cBtn .mi2{display:inline-block;line-height:1}
   .cBtn.grey.off .mi2{filter:grayscale(1);opacity:.7}
 
+  /* ---------- GRUP / VIDEO GORUSME SAHNESI ---------- */
+  #callOverlay{flex-direction:column}
+  #callOverlay .callBox{position:relative;z-index:3}
+  #callAudios{position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;
+    opacity:0;pointer-events:none}
+  .callStage{position:absolute;inset:0;z-index:1;display:none;flex-wrap:wrap;gap:12px;
+    align-content:flex-start;justify-content:center;padding:30px 22px 250px;overflow:auto}
+  #callOverlay.stage .callStage{display:flex}
+  #callOverlay.stage .callAvatar{display:none}
+  #callOverlay.stage .callBox{position:absolute;left:0;right:0;bottom:0;max-width:none;margin:0;
+    padding:0 20px 30px;background:linear-gradient(180deg,rgba(5,8,11,0) 0%,rgba(5,8,11,.92) 44%)}
+  #callOverlay.stage .callName{font-size:20px;margin-bottom:3px}
+  #callOverlay.stage .callAlias{margin-bottom:5px}
+  #callOverlay.stage .callStatus{margin-bottom:3px}
+  #callOverlay.stage .callActions{margin-top:18px;gap:34px}
+  .cTile{position:relative;border-radius:16px;overflow:hidden;flex:0 0 auto;
+    background:rgba(20,26,34,.92);border:1px solid var(--line2);
+    display:grid;place-items:center}
+  .cTile.av{width:116px;height:116px}
+  .cTile.vid{width:min(46%,318px);aspect-ratio:16/10;background:#05080b}
+  .cTile video{width:100%;height:100%;object-fit:cover;background:#05080b}
+  .cTile .tAv{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;
+    font-size:23px;font-weight:800;color:#04140f}
+  .cTile .tName{position:absolute;left:7px;bottom:6px;font-size:11px;font-weight:650;
+    background:rgba(0,0,0,.6);color:#fff;padding:3px 9px;border-radius:9px;max-width:92%;
+    overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .cTile.me .tName{left:auto;right:7px}
+  .cTile.wait{opacity:.7}
+  .cTile.off .tAv{filter:grayscale(1);opacity:.8}
+  .cTile .tMic{position:absolute;right:7px;top:7px;width:24px;height:24px;border-radius:50%;
+    background:rgba(0,0,0,.6);display:grid;place-items:center;font-size:12px;color:#fff}
+  .cTile .tMic.muted{background:rgba(240,74,94,.85)}
+  #ringOverlay.stage .callBox{max-width:340px}
+
   /* ---------- PANEL PENCERELERI ---------- */
   .adminWrap{width:100%;max-width:880px;margin:0 auto;background:var(--panel);
     border:1px solid var(--line2);border-radius:var(--r-lg);overflow:hidden;
@@ -614,6 +648,7 @@
         <div class="headBtns">
           <button class="iconBtn" id="msgSearchBtn" title="Mesajlarda ara">⌕</button>
           <button class="iconBtn" id="callBtn" title="Sesli ara">📞</button>
+          <button class="iconBtn" id="videoBtn" title="Görüntülü ara">🎥</button>
         </div>
       </div>
       <div class="searchMsgBar hidden" id="msgSearchBar">
@@ -650,7 +685,7 @@
 
 <div class="overlay hidden" id="ringOverlay">
   <div class="callBox">
-    <div class="ringLabel">Gelen sesli arama</div>
+    <div class="ringLabel" id="ringLabel">Gelen sesli arama</div>
     <div class="callAvatar ringing" id="ringAvatar" style="background:#0dbd8b">?</div>
     <div class="callName" id="ringName">—</div>
     <div class="callAlias" id="ringAlias">@:nexus</div>
@@ -663,6 +698,7 @@
 </div>
 
 <div class="overlay hidden" id="callOverlay">
+  <div class="callStage" id="callStage"></div>
   <div class="callBox">
     <div class="callAvatar" id="callAvatar" style="background:#0dbd8b">?</div>
     <div class="callName" id="callName">—</div>
@@ -671,10 +707,12 @@
     <div class="callTimer" id="callTimer"></div>
     <div class="callActions">
       <button class="cBtn grey" id="muteBtn" title="Mikrofonu kapat"><span class="mi2">🎙</span><small>Mikrofon</small></button>
+      <button class="cBtn grey hidden" id="camBtn" title="Kamerayı kapat"><span class="mi2">🎥</span><small>Kamera</small></button>
       <button class="cBtn red phone" id="endBtn" title="Görüşmeyi sonlandır"><span class="ph">📞</span><small>Kapat</small></button>
     </div>
   </div>
 </div>
+<div id="callAudios"></div>
 
 <div class="overlay hidden" id="profileOverlay" style="align-items:stretch;padding:0">
   <div class="adminWrap" style="max-width:470px">

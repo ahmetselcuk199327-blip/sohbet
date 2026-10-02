@@ -273,6 +273,28 @@ function startApp(){
     });
   }, ()=>{});
 
+  onSnapshot(query(collection(db,"aramalar"), where("arananlar","array-contains", me.uid)), snap=>{
+    snap.docChanges().forEach(ch=>{
+      const d = { id: ch.doc.id, ...ch.doc.data() };
+      if(ch.type === "added" && d.durum === "zil" && Date.now() - (d.olusturuldu||0) < 60000
+        && !(d.retler||[]).includes(me.uid)){
+        if(ringCall || call){
+          updateDoc(doc(db,"aramalar",d.id), { retler: arrayUnion(me.uid) }).catch(()=>{});
+        }else{
+          showRing(d);
+        }
+      }
+      if(ringCall && ringCall.id === d.id &&
+        (d.durum !== "zil" || (d.retler||[]).includes(me.uid))){
+        ringCall = null;
+        Snd.stop();
+        $("ringOverlay").classList.add("hidden");
+        if(d.durum === "bitti") toast("Grup araması kapatıldı");
+      }
+      if(call && call.id === d.id) handleCallState(d);
+    });
+  }, ()=>{});
+
   renderSide();
 }
 
@@ -436,7 +458,8 @@ function enterChat(a){
 function renderChatHeader(){
   if(!active) return;
   const grp = active.type === "grup";
-  $("callBtn").classList.toggle("hidden", grp);
+  $("callBtn").classList.remove("hidden");
+  $("videoBtn").classList.remove("hidden");
   if(grp){
     const c = chats.find(x=>x.id===active.id);
     if(c){ active.grupAd = c.grupAd || active.grupAd; active.uyeler = c.uyeler || active.uyeler; }
@@ -1500,7 +1523,11 @@ const Notif = {
   },
   call(d){
     Snd.pop();
-    this.push(d.arayanAd, "Sesli arama isteği gönderiyor", { tag: "call", onClick: ()=>{
+    const grup = d.tur === "grup";
+    const body = grup
+      ? (d.video ? "Görüntülü grup araması" : "Sesli grup araması")
+      : "Sesli arama isteği gönderiyor";
+    this.push(grup ? (d.grupAd || "Grup") : d.arayanAd, body, { tag: "call", onClick: ()=>{
       try{ window.focus(); }catch(e){}
     }});
   }
@@ -1521,12 +1548,37 @@ const RTC_CFG = { iceServers: [
   { urls: ["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302","stun:stun2.l.google.com:19302","stun:stun.cloudflare.com:3478"] }
 ] };
 
+function paintGroupAvatar(el, uid){
+  paintAvatar(el, { uid: uid, icon: "👥" });
+  el.style.fontSize = "";
+  const g = el.querySelector(".gIco");
+  if(g) g.style.fontSize = "52px";
+}
+
 function showRing(d){
   ringCall = d;
-  paintAvatar($("ringAvatar"), { uid: d.arayan, ad: d.arayanAd, photo: fotoOf(d.arayan) });
-  $("ringAvatar").classList.add("ringing");
-  $("ringName").textContent = d.arayanAd;
-  $("ringAlias").textContent = `@${d.arayan}:nexus`;
+  if(d.tur === "grup"){
+    paintGroupAvatar($("ringAvatar"), d.grupId);
+    $("ringAvatar").classList.add("ringing");
+    $("ringName").textContent = d.grupAd || "Grup";
+    $("ringAlias").textContent = `${(d.members||[]).length} üye · grup`;
+    $("ringLabel").textContent = d.video ? "Gelen görüntülü grup araması" : "Gelen sesli grup araması";
+    setTimeout(()=>{
+      if(ringCall && ringCall.id === d.id){
+        ringCall = null;
+        Snd.stop();
+        $("ringOverlay").classList.add("hidden");
+        toast("Arama süresi doldu");
+      }
+    }, 50000);
+  }else{
+    $("ringAvatar").style.fontSize = "";
+    paintAvatar($("ringAvatar"), { uid: d.arayan, ad: d.arayanAd, photo: fotoOf(d.arayan) });
+    $("ringAvatar").classList.add("ringing");
+    $("ringName").textContent = d.arayanAd;
+    $("ringAlias").textContent = `@${d.arayan}:nexus`;
+    $("ringLabel").textContent = "Gelen sesli arama";
+  }
   $("ringOverlay").classList.remove("hidden");
   Snd.ringtone();
   Notif.call(d);
@@ -1534,10 +1586,14 @@ function showRing(d){
 
 $("ringReject").addEventListener("click", async ()=>{
   if(!ringCall) return;
-  const id = ringCall.id; ringCall = null;
+  const id = ringCall.id; const grup = ringCall.tur === "grup"; ringCall = null;
   Snd.stop();
   $("ringOverlay").classList.add("hidden");
-  await updateDoc(doc(db,"aramalar",id), { durum:"ret", bitis: Date.now() }).catch(()=>{});
+  if(grup){
+    await updateDoc(doc(db,"aramalar",id), { retler: arrayUnion(me.uid) }).catch(()=>{});
+  }else{
+    await updateDoc(doc(db,"aramalar",id), { durum:"ret", bitis: Date.now() }).catch(()=>{});
+  }
   Snd.end();
   toast("Arama reddedildi");
 });
@@ -1548,24 +1604,58 @@ $("ringAccept").addEventListener("click", async ()=>{
   Snd.stop();
   $("ringOverlay").classList.add("hidden");
   try{
-    const local = await navigator.mediaDevices.getUserMedia({ audio:true });
-    call = { id:d.id, role:"callee", local, muted:false, step:"wait-offer", connectedAt:0, peer: d.arayan };
-    await updateDoc(doc(db,"aramalar",d.id), { durum:"kabul", kabulZaman: Date.now() });
-    showCallOverlay(d.arayanAd, d.arayan, "Bağlanıyor…");
-    Snd.connecting();
-    listenCandidates(d.id);
+    const local = await navigator.mediaDevices.getUserMedia({ audio:true, video: !!d.video });
+    if(d.tur === "grup"){
+      const members = Array.from(new Set([d.arayan, ...(d.members||[])]));
+      call = { id:d.id, tur:"grup", role:"uye", local, muted:false, camOff:false,
+               video: !!d.video, members, retler:[], katilan:[me.uid],
+               grupId:d.grupId, grupAd:d.grupAd, peers:{}, peerStreams:{}, connectedAt:0 };
+      await updateDoc(doc(db,"aramalar",d.id), { katilan: arrayUnion(me.uid) });
+      showGroupCallOverlay("Bağlanıyor…");
+      Snd.connecting();
+      armConnectTimeout(45000);
+    }else{
+      call = { id:d.id, role:"callee", local, muted:false, step:"wait-offer", connectedAt:0, peer: d.arayan };
+      await updateDoc(doc(db,"aramalar",d.id), { durum:"kabul", kabulZaman: Date.now() });
+      showCallOverlay(d.arayanAd, d.arayan, "Bağlanıyor…");
+      Snd.connecting();
+      listenCandidates(d.id);
+    }
   }catch(e){
     toast("Mikrofon izni verilmedi", true);
     Snd.fail();
-    updateDoc(doc(db,"aramalar",d.id), { durum:"bitti" }).catch(()=>{});
+    if(d.tur === "grup") updateDoc(doc(db,"aramalar",d.id), { retler: arrayUnion(me.uid) }).catch(()=>{});
+    else updateDoc(doc(db,"aramalar",d.id), { durum:"bitti" }).catch(()=>{});
   }
 });
 
-$("callBtn").addEventListener("click", async ()=>{
-  if(!active || active.type === "grup"){ toast("Grup araması henüz kullanılamıyor", true); return; }
+async function startCall(withVideo){
+  if(!active) return;
   if(call){ toast("Zaten bir görüşme açık"); return; }
+  if(ringCall){ toast("Gelen bir arama var"); return; }
   try{
-    const local = await navigator.mediaDevices.getUserMedia({ audio:true });
+    const local = await navigator.mediaDevices.getUserMedia({ audio:true, video: !!withVideo });
+    if(active.type === "grup"){
+      const members = Array.from(new Set([me.uid, ...(active.uyeler||[])]));
+      const others = members.filter(u=>u!==me.uid);
+      const id = "g_" + active.id + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
+      call = { id, tur:"grup", role:"caller", local, muted:false, camOff:false,
+               video: !!withVideo, members, retler:[], katilan:[me.uid],
+               grupId: active.id, grupAd: active.grupAd || "Grup",
+               peers:{}, peerStreams:{}, connectedAt:0 };
+      await setDoc(doc(db,"aramalar",id), {
+        tur:"grup", grupId: active.id, grupAd: active.grupAd || "Grup",
+        arayan: me.uid, arayanAd: me.ad,
+        members, arananlar: others, video: !!withVideo,
+        katilan: [me.uid], retler: [],
+        durum: "zil", olusturuldu: Date.now()
+      });
+      showGroupCallOverlay("Aranıyor…");
+      Snd.ringback();
+      Notif.notify(me.ad, (withVideo ? "Görüntülü" : "Sesli") + " grup araması", "call_" + id, others);
+      armConnectTimeout(60000);
+      return;
+    }
     const id = `${me.uid}_${active.other}_${Date.now()}`;
     call = { id, role:"caller", local, muted:false, step:"wait-accept", connectedAt:0, other: active.other };
     await setDoc(doc(db,"aramalar",id), {
@@ -1579,20 +1669,270 @@ $("callBtn").addEventListener("click", async ()=>{
     listenCandidates(id);
     setTimeout(()=>{ if(call && call.id===id && call.step==="wait-accept") endCall("cevapsiz"); }, 45000);
   }catch(e){ toast("Mikrofon izni verilmedi", true); Snd.fail(); }
-});
+}
+
+$("callBtn").addEventListener("click", ()=> startCall(false));
+$("videoBtn").addEventListener("click", ()=> startCall(true));
 
 function showCallOverlay(name, uid, status){
   paintAvatar($("callAvatar"), { uid, ad: name, photo: fotoOf(uid) });
   $("callAvatar").classList.add("ringing");
+  $("callAvatar").style.fontSize = "";
   $("callName").textContent = name;
   $("callAlias").textContent = `@${uid}:nexus`;
   $("callStatus").textContent = status;
   $("callTimer").textContent = "";
+  $("camBtn").classList.add("hidden");
+  $("callOverlay").classList.remove("stage");
   $("callOverlay").classList.remove("hidden");
+}
+
+function showGroupCallOverlay(status){
+  const ov = $("callOverlay");
+  paintGroupAvatar($("callAvatar"), call.grupId);
+  $("callAvatar").classList.add("ringing");
+  $("callName").textContent = call.grupAd;
+  $("callAlias").textContent = `${groupRoster(call).length} üye · ${call.video ? "görüntülü" : "sesli"} grup araması`;
+  $("callStatus").textContent = status;
+  $("callTimer").textContent = "";
+  $("camBtn").classList.toggle("hidden", !call.video);
+  ov.classList.add("stage");
+  ov.classList.remove("hidden");
+  renderCallStage();
+}
+
+function renderCallStage(){
+  if(!call || call.tur !== "grup") return;
+  const st = $("callStage");
+  const joined = (call.katilan||[]).filter(u=> call.members.includes(u));
+  st.innerHTML = groupRoster(call).map(u=>{
+    const isMe = u === me.uid;
+    const on = joined.includes(u);
+    const hasStream = isMe || !!call.peerStreams[u];
+    const vid = call.video && on && hasStream;
+    const av = avatarHtml({ uid:u, ad: adOf(u,u), photo: vid ? "" : fotoOf(u), cls:"tAv" });
+    const media = vid
+      ? `<video data-uv="${u}" playsinline muted></video>`
+      : av;
+    const label = isMe ? "Sen"
+      : !on ? adOf(u,u) + " · bekliyor"
+      : !hasStream ? adOf(u,u) + " · bağlanıyor"
+      : adOf(u,u);
+    return `<div class="cTile ${call.video?"vid":"av"}${isMe?" me":""}${on?"":" wait"}" data-tile="${u}">` +
+      media +
+      `<span class="tName">${esc(label)}</span>` +
+      (isMe && call.muted ? `<span class="tMic muted">🎙</span>` : "") +
+      `</div>`;
+  }).join("");
+  attachStageMedia();
+}
+
+function attachStageMedia(){
+  if(!call || call.tur !== "grup") return;
+  const st = $("callStage");
+  const self = st.querySelector('video[data-uv="'+me.uid+'"]');
+  if(self){
+    if(self.srcObject !== call.local) self.srcObject = call.local;
+    self.muted = true;
+    self.style.opacity = call.camOff ? ".18" : "1";
+    self.play().catch(()=>{});
+  }
+  Object.keys(call.peerStreams||{}).forEach(uid=>{
+    const v = st.querySelector('video[data-uv="'+uid+'"]');
+    if(v && v.srcObject !== call.peerStreams[uid]){
+      v.srcObject = call.peerStreams[uid];
+      v.muted = true;
+      v.play().catch(()=>{});
+    }
+  });
+}
+
+function updateGroupCallStatus(){
+  if(!call || call.tur !== "grup") return;
+  const roster = groupRoster(call);
+  const joined = (call.katilan||[]).filter(u=> roster.includes(u));
+  const conn = Object.keys(call.peers||{}).filter(u=> call.peers[u].connected).length;
+  const need = Math.max(1, joined.filter(u=>u!==me.uid).length);
+  const total = roster.length;
+  $("callStatus").textContent = call.connectedAt
+    ? "Görüşme sürüyor · " + joined.length + "/" + total + " üye"
+    : "Bağlanıyor… · " + conn + "/" + need + " bağlantı";
+}
+
+/* ===== GRUP ARAMA: MESH + ESLESME (PAIR) SINYALIZASYONU ===== */
+function ensureGroupAudio(uid, stream){
+  const box = $("callAudios");
+  let a = box.querySelector('audio[data-ua="'+uid+'"]');
+  if(!a){
+    a = document.createElement("audio");
+    a.autoplay = true;
+    a.setAttribute("playsinline","");
+    a.setAttribute("data-ua", uid);
+    box.appendChild(a);
+  }
+  if(a.srcObject !== stream){
+    a.srcObject = stream;
+    a.muted = false;
+    a.play().catch(()=>{});
+  }
+}
+function clearGroupAudio(uid){
+  const a = $("callAudios").querySelector('audio[data-ua="'+uid+'"]');
+  if(a){ try{ a.srcObject = null; }catch(e){} a.remove(); }
+}
+function clearAllGroupAudio(){ $("callAudios").innerHTML = ""; }
+
+function groupRoster(c){ return (c && c.members || []).filter(u=> (c.retler||[]).indexOf(u) < 0); }
+function groupPairKey(a,b){ return [a,b].sort().join("~"); }
+function groupPairRef(uid){
+  return doc(db,"aramalar",call.id,"esler",groupPairKey(me.uid, uid));
+}
+
+function groupSyncPeers(){
+  if(!call || call.tur !== "grup") return;
+  const roster = groupRoster(call);
+  const joined = (call.katilan||[]).filter(u=> roster.includes(u));
+  const others = joined.filter(u=> u !== me.uid);
+  Object.keys(call.peers).forEach(uid=>{
+    if(others.indexOf(uid) < 0) closeGroupPeer(uid);
+  });
+  others.forEach(uid=>{ if(!call.peers[uid]) groupStartPeer(uid); });
+  renderCallStage();
+  updateGroupCallStatus();
+  groupMaybeConnected();
+}
+
+function groupStartPeer(uid){
+  const pc = new RTCPeerConnection(RTC_CFG);
+  call.local.getTracks().forEach(t=>{ try{ pc.addTrack(t, call.local); }catch(e){} });
+  const peer = { uid, pc, init: me.uid < uid, queue: [], unsubs: [],
+                 connected:false, sentOffer:false, answered:false, gotAnswer:false };
+  call.peers[uid] = peer;
+  pc.onicecandidate = e=>{
+    if(e.candidate && call && call.peers[uid]){
+      addDoc(collection(groupPairRef(uid), "adaylar"), {
+        kim: me.uid, k: e.candidate.toJSON(), at: Date.now()
+      }).catch(()=>{});
+    }
+  };
+  pc.ontrack = e=>{
+    if(!call || !call.peers[uid]) return;
+    const s = e.streams[0];
+    call.peerStreams[uid] = s;
+    ensureGroupAudio(uid, s);
+    if(call.video) renderCallStage();
+    updateGroupCallStatus();
+  };
+  pc.onconnectionstatechange = ()=>{
+    if(!call || !call.peers[uid]) return;
+    const st = pc.connectionState;
+    if(st === "connected"){ peer.connected = true; groupMaybeConnected(); }
+    else if(st === "failed"){ closeGroupPeer(uid); return; }
+    updateGroupCallStatus();
+  };
+  groupListenPair(peer);
+  if(peer.init) groupMaybeOffer(peer);
+}
+
+function closeGroupPeer(uid){
+  const p = call && call.peers[uid];
+  if(p){
+    (p.unsubs||[]).forEach(fn=>{ try{ fn(); }catch(e){} });
+    try{ p.pc.close(); }catch(e){}
+    delete call.peers[uid];
+  }
+  if(call) delete call.peerStreams[uid];
+  clearGroupAudio(uid);
+}
+
+function groupListenPair(peer){
+  const uid = peer.uid;
+  const pRef = groupPairRef(uid);
+  peer.unsubs.push(onSnapshot(pRef, snap=>{
+    if(!call || !call.peers[uid]) return;
+    const d = snap.data();
+    if(!d) return;
+    if(peer.init){
+      if(d.cevap && !peer.gotAnswer){
+        peer.gotAnswer = true;
+        peer.pc.setRemoteDescription(new RTCSessionDescription(d.cevap))
+          .then(()=> groupFlush(peer)).catch(()=>{});
+      }
+    }else if(d.teklif && !peer.answered){
+      peer.answered = true;
+      groupAnswer(peer, d.teklif);
+    }
+  }, ()=>{}));
+  peer.unsubs.push(onSnapshot(collection(pRef, "adaylar"), snap=>{
+    snap.docChanges().forEach(ch=>{
+      if(ch.type !== "added") return;
+      const c = ch.doc.data();
+      if(!call || !call.peers[uid] || c.kim === me.uid) return;
+      if(peer.pc.remoteDescription) peer.pc.addIceCandidate(new RTCIceCandidate(c.k)).catch(()=>{});
+      else peer.queue.push(c.k);
+    });
+  }, ()=>{}));
+}
+
+function groupFlush(peer){
+  const q = peer.queue || [];
+  peer.queue = [];
+  q.forEach(k=>{ try{ peer.pc.addIceCandidate(new RTCIceCandidate(k)).catch(()=>{}); }catch(e){} });
+}
+
+async function groupMaybeOffer(peer){
+  if(!call || !call.peers[peer.uid] || !peer.init || peer.sentOffer) return;
+  peer.sentOffer = true;
+  try{
+    const offer = await peer.pc.createOffer();
+    await peer.pc.setLocalDescription(offer);
+    await setDoc(groupPairRef(peer.uid), {
+      a: me.uid < peer.uid ? me.uid : peer.uid,
+      b: me.uid < peer.uid ? peer.uid : me.uid,
+      teklifci: me.uid, teklif: peer.pc.localDescription.toJSON(), at: Date.now()
+    }, { merge:true });
+  }catch(e){ peer.sentOffer = false; }
+}
+
+async function groupAnswer(peer, offerSdp){
+  try{
+    await peer.pc.setRemoteDescription(new RTCSessionDescription(offerSdp));
+    groupFlush(peer);
+    const ans = await peer.pc.createAnswer();
+    await peer.pc.setLocalDescription(ans);
+    await setDoc(groupPairRef(peer.uid), {
+      cevap: peer.pc.localDescription.toJSON(), cevapci: me.uid, at: Date.now()
+    }, { merge:true });
+  }catch(e){ peer.answered = false; }
+}
+
+function groupMaybeConnected(){
+  if(!call || call.tur !== "grup" || call.connectedAt) return;
+  const others = (call.katilan||[]).filter(u=> groupRoster(call).indexOf(u) >= 0 && u !== me.uid);
+  if(!others.length) return;
+  if(!others.every(u=> call.peers[u] && call.peers[u].connected)) return;
+  call.connectedAt = Date.now();
+  Snd.stop(); Snd.connected();
+  $("callAvatar").classList.remove("ringing");
+  startTimer();
+  updateGroupCallStatus();
 }
 
 function handleCallState(d){
   if(!call || call.id !== d.id) return;
+  if(call.tur === "grup"){
+    if(d.durum === "bitti"){ endCall(call.connectedAt ? "karsi-kapatti" : "baglanamadi"); return; }
+    if(d.durum === "ret"){ endCall("ret"); return; }
+    const k = d.katilan || [];
+    const r = d.retler || [];
+    const changed = k.join(",") !== (call.katilan||[]).join(",")
+      || r.join(",") !== (call.retler||[]).join(",");
+    call.katilan = k;
+    call.retler = r;
+    if(changed) groupSyncPeers();
+    else updateGroupCallStatus();
+    return;
+  }
   if(call.role === "caller"){
     if(d.durum === "kabul" && call.step === "wait-accept"){
       call.step = "offer";
@@ -1692,11 +2032,11 @@ function flushQueue(){
   candQueue = [];
 }
 
-function armConnectTimeout(){
+function armConnectTimeout(ms){
   const id = call && call.id;
   setTimeout(()=>{
     if(call && call.id === id && !call.connectedAt) endCall("baglanamadi");
-  }, 30000);
+  }, ms || 30000);
 }
 
 function startTimer(){
@@ -1714,6 +2054,18 @@ $("muteBtn").addEventListener("click", ()=>{
   call.muted = !call.muted;
   call.local.getAudioTracks().forEach(t=> t.enabled = !call.muted);
   $("muteBtn").classList.toggle("off", call.muted);
+  if(call.tur === "grup") renderCallStage();
+});
+
+$("camBtn").addEventListener("click", ()=>{
+  if(!call || call.tur !== "grup" || !call.local) return;
+  const t = call.local.getVideoTracks()[0];
+  if(!t) return;
+  call.camOff = !call.camOff;
+  t.enabled = !call.camOff;
+  $("camBtn").classList.toggle("off", call.camOff);
+  $("camBtn").title = call.camOff ? "Kamerayı aç" : "Kamerayı kapat";
+  attachStageMedia();
 });
 
 $("endBtn").addEventListener("click", ()=> endCall("ben-bitirdim"));
@@ -1741,6 +2093,22 @@ function writeCallLog(c, why){
   }).catch(()=>{});
 }
 
+function writeGroupCallLog(c, why){
+  const sure = c.connectedAt ? fmtDur(Date.now() - c.connectedAt) : "";
+  const kind = c.video ? "Görüntülü" : "Sesli";
+  const text = why === "baglanamadi" ? "📞 Bağlanılamadı"
+    : why === "ret" ? "📞 Grup araması reddedildi"
+    : why === "baglanti-koptu" ? "📞 Bağlantı koptu"
+    : why === "hata" ? "📞 Arama başlatılamadı"
+    : sure ? "📞 " + kind + " grup araması · " + sure
+    : why === "ben-bitirdim" ? "📞 Grup araması bağlanmadan bitirildi"
+    : "📞 Grup araması";
+  addDoc(collection(doc(db,"sohbetler",c.grupId),"mesajlar"), {
+    icerik: text, sistem: true, yazan: me.uid, yazanAd: me.ad,
+    ts: Date.now(), zaman: serverTimestamp()
+  }).catch(()=>{});
+}
+
 function endCall(why){
   if(!call) return;
   const c = call;
@@ -1751,14 +2119,54 @@ function endCall(why){
   else Snd.end();
   if(candUnsub){ candUnsub(); candUnsub = null; }
   candQueue = [];
-  try{ if(c.pc) c.pc.close(); }catch(e){}
+  if(c.tur === "grup"){
+    Object.keys(c.peers||{}).forEach(uid=>{
+      const p = c.peers[uid];
+      (p.unsubs||[]).forEach(fn=>{ try{ fn(); }catch(e){} });
+      try{ p.pc.close(); }catch(e){}
+    });
+    c.peers = {};
+    clearAllGroupAudio();
+    $("callStage").innerHTML = "";
+    $("callOverlay").classList.remove("stage");
+  }else{
+    try{ if(c.pc) c.pc.close(); }catch(e){}
+    $("remoteAudio").srcObject = null;
+  }
   try{ if(c.local) c.local.getTracks().forEach(t=>t.stop()); }catch(e){}
-  $("remoteAudio").srcObject = null;
   $("callOverlay").classList.add("hidden");
   $("muteBtn").classList.remove("off");
+  $("camBtn").classList.remove("off");
+  $("camBtn").classList.add("hidden");
 
   const ref = doc(db,"aramalar",c.id);
-  if(c.role === "caller") writeCallLog(c, why);
+  if(c.role === "caller"){
+    if(c.tur === "grup") writeGroupCallLog(c, why);
+    else writeCallLog(c, why);
+  }
+
+  if(c.tur === "grup"){
+    getDoc(ref).then(snap=>{
+      if(!snap.exists()) return;
+      const d = snap.data();
+      if(d.durum === "bitti") return;
+      if(c.role === "caller"){
+        updateDoc(ref, { durum:"bitti", sonuc:"bitti", bitis: Date.now() }).catch(()=>{});
+      }else{
+        const patch = { katilan: arrayRemove(me.uid) };
+        const remaining = (d.katilan||[]).filter(u=> u !== me.uid);
+        if(remaining.length <= 1){ patch.durum = "bitti"; patch.bitis = Date.now(); }
+        updateDoc(ref, patch).catch(()=>{});
+      }
+    }).catch(()=>{});
+    if(why === "ben-bitirdim") toast("Görüşme sonlandırıldı");
+    else if(why === "baglanamadi") toast("Kimse aramaya katılmadı");
+    else if(why === "baglanti-koptu") toast("Bağlantı koptu");
+    else if(why === "ret") toast("Arama reddedildi");
+    else if(why === "karsi-kapatti") toast("Görüşme kapatıldı");
+    return;
+  }
+
   getDoc(ref).then(snap=>{
     if(!snap.exists()) return;
     const d = snap.data();
