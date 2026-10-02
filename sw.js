@@ -7,8 +7,12 @@ self.addEventListener("push", ev=>{
   catch(err){ data = { body: ev.data ? ev.data.text() : "" }; }
 
   ev.waitUntil((async ()=>{
+    self.__last = data;
     const wins = await self.clients.matchAll({ type:"window", includeUncontrolled:true });
-    if(wins.length > 0) return;
+    if(wins.length > 0){
+      for(const c of wins){ try{ c.postMessage({ nexus:"push", data }); }catch(e){} }
+      return;
+    }
     await self.registration.showNotification(data.title || "Nexus", {
       body: data.body || "",
       icon: "icon-192.png",
