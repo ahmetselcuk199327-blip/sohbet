@@ -106,6 +106,7 @@ function startApp(){
   if(me.rol === "admin") $("adminBtn").classList.remove("hidden");
   Notif.refreshBtn();
   Notif.since = Date.now();
+  Notif.start();
 
   setInterval(()=>{
     updateDoc(doc(db,"kullanicilar",me.uid), { sonGorulme: Date.now(), cevrimici: true }).catch(()=>{});
@@ -591,6 +592,8 @@ async function send(){
       upd[`okunmamis.${active.other}`] = increment(1);
     }
     updateDoc(ref, upd).catch(()=>{});
+    const to = grp ? (active.uyeler||[]) : (active.other ? [active.other] : []);
+    Notif.notify(me.ad, text, "chat_" + active.id, to);
   }catch(e){ toast("Gönderilemedi: "+e.message, true); }
 }
 $("sendBtn").addEventListener("click", send);
@@ -669,9 +672,23 @@ const Snd = (()=>{
 /* ===== BILDIRIMLER ===== */
 const FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230dbd8b'/%3E%3Ctext x='32' y='44' font-size='36' font-weight='800' text-anchor='middle' fill='%2304140f' font-family='sans-serif'%3EN%3C/text%3E%3C/svg%3E";
 
+/* Arka plan (sekme kapali) bildirimleri icin relay ucu. Bossa sadece acik sekme bildirimleri calisir. */
+const PUSH_RELAY = "";
+const VAPID_PUB = "BLzCUG9gK63kzosY2ZrA8-bX69C2N-zPodDx1ij7cSDb71OwAIfb3AezMbL-kQYhRqR9ihR_zR6DXhFUbefCNm8";
+
+function b64ToUint8(b64){
+  const pad = "=".repeat((4 - b64.length % 4) % 4);
+  const raw = (b64 + pad).replace(/-/g,"+").replace(/_/g,"/");
+  const bin = atob(raw);
+  const out = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 const Notif = {
   last: {},
   since: 0,
+  reg: null,
   supported(){ return typeof Notification !== "undefined"; },
   granted(){ return this.supported() && Notification.permission === "granted"; },
   refreshBtn(){
@@ -699,6 +716,48 @@ const Notif = {
         toast("Bildirimler açıldı");
       }else{ toast("Bildirim izni verilmedi", true); }
     }catch(e){ toast("İzin alınamadı: "+e.message, true); }
+  },
+  async start(){
+    if(!("serviceWorker" in navigator)) return;
+    try{ this.reg = await navigator.serviceWorker.register("sw.js"); }
+    catch(e){ this.reg = null; }
+    if(this.granted()) this.subscribe();
+  },
+  async subscribe(){
+    if(!PUSH_RELAY || !("serviceWorker" in navigator) || !this.granted()) return false;
+    try{
+      if(!this.reg) this.reg = await navigator.serviceWorker.register("sw.js");
+      if(!this.reg) return false;
+      let sub = await this.reg.pushManager.getSubscription();
+      if(!sub){
+        sub = await this.reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: b64ToUint8(VAPID_PUB)
+        });
+      }
+      await fetch(PUSH_RELAY + "/subscribe", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ uid: me.uid, ad: me.ad, sub: sub.toJSON() })
+      });
+      return true;
+    }catch(e){ console.warn("Push aboneliği kurulamadı:", e && e.message); return false; }
+  },
+  async unsubscribe(){
+    try{
+      if(this.reg){ const s = await this.reg.pushManager.getSubscription(); if(s) await s.unsubscribe(); }
+    }catch(e){}
+  },
+  notify(title, body, tag, to){
+    if(!PUSH_RELAY || !me || !to || !to.length) return;
+    try{
+      fetch(PUSH_RELAY + "/notify", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          from: me.uid, to,
+          payload:{ title, body: String(body||"").slice(0,180), tag: tag || "nexus", url:"./" }
+        })
+      }).catch(()=>{});
+    }catch(e){}
   },
   push(title, body, opts){
     if(!this.granted()) return;
@@ -741,7 +800,10 @@ const Notif = {
   }
 };
 
-$("notifBtn").addEventListener("click", ()=> Notif.ask());
+$("notifBtn").addEventListener("click", async ()=>{
+  await Notif.ask();
+  if(Notif.granted()) Notif.subscribe();
+});
 
 /* ===== SESLİ ARAMA (WebRTC) ===== */
 let call = null;
@@ -807,6 +869,7 @@ $("callBtn").addEventListener("click", async ()=>{
     });
     showCallOverlay(active.otherAd, active.other, "Aranıyor…");
     Snd.ringback();
+    Notif.notify(me.ad, "Sesli arama isteği gönderiyor", "call_" + id, [active.other]);
     listenCandidates(id);
     setTimeout(()=>{ if(call && call.id===id && call.step==="wait-accept") endCall("cevapsiz"); }, 45000);
   }catch(e){ toast("Mikrofon izni verilmedi", true); Snd.fail(); }
@@ -965,6 +1028,7 @@ function writeCallLog(c, why){
     : why === "mesgul" ? "📞 Karşı taraf meşgul"
     : why === "baglanamadi" ? "📞 Bağlanılamadı"
     : sure ? "📞 Sesli arama · " + sure
+    : why === "ben-bitirdim" ? "📞 Bağlanmadan bitirildi"
     : "📞 Arama";
   addDoc(collection(doc(db,"sohbetler",chatId),"mesajlar"), {
     icerik: text, sistem: true, yazan: me.uid, yazanAd: me.ad,
