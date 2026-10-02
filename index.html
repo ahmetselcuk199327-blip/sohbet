@@ -259,6 +259,77 @@
     font-weight:700;margin:16px 0 7px}
   .fwdSec:first-child{margin-top:0}
 
+  /* ---------- REAKSIYON / EMOJI / CIKARTMA ---------- */
+  .msgReacts{clear:both;display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
+  .rct{display:inline-flex;align-items:center;gap:3px;background:rgba(0,0,0,.3);cursor:pointer;
+    border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:2px 7px;font-size:13.5px;
+    line-height:1.35;transition:.13s}
+  .msg.them .rct{background:rgba(255,255,255,.07)}
+  .rct:hover{transform:translateY(-1px);border-color:var(--acc)}
+  .rct.mine{border-color:var(--acc);background:rgba(13,189,139,.22);box-shadow:0 0 0 1px rgba(13,189,139,.35)}
+  .rct i{font-style:normal;font-size:10.5px;font-weight:800;color:var(--txt2);font-variant-numeric:tabular-nums}
+  .reactBar{position:fixed;z-index:95;display:flex;align-items:center;gap:2px;padding:7px 8px;
+    background:rgba(24,30,41,.99);border:1px solid var(--line2);border-radius:28px;
+    box-shadow:0 16px 44px rgba(0,0,0,.55);animation:pop .13s ease;max-width:calc(100vw - 16px)}
+  .reactBar button{width:35px;height:35px;flex:none;border:0;border-radius:50%;background:transparent;
+    font-size:21px;cursor:pointer;transition:.12s;display:grid;place-items:center;padding:0}
+  .reactBar button:hover{background:rgba(255,255,255,.11);transform:scale(1.16)}
+  .reactBar .rbSep{width:1px;height:23px;flex:none;background:var(--line2);margin:0 4px}
+  .reactBar button.rbMore{font-size:15px;color:var(--txt2)}
+  .reactBar button.rbMore:hover{color:var(--acc)}
+
+  .emoBtn{width:40px;height:44px;flex:none;border:0;background:transparent;color:var(--txt2);
+    font-size:21px;cursor:pointer;border-radius:12px;transition:.13s;display:grid;place-items:center}
+  .emoBtn:hover{color:var(--acc);background:rgba(255,255,255,.06)}
+  .emoPanel{background:var(--panel2);border-top:1px solid var(--line);max-height:274px;
+    display:flex;flex-direction:column;animation:pop .14s ease}
+  .emoTabs{display:flex;gap:3px;align-items:center;padding:8px 9px 4px;overflow-x:auto;scrollbar-width:none}
+  .emoTabs::-webkit-scrollbar{display:none}
+  .emoTab{flex:none;padding:7px 11px;border-radius:9px;font-size:13px;font-weight:700;
+    color:var(--txt2);background:transparent;border:1px solid transparent;cursor:pointer;transition:.13s;white-space:nowrap}
+  .emoTab:hover{background:rgba(255,255,255,.06)}
+  .emoTab.on{background:rgba(13,189,139,.16);border-color:rgba(13,189,139,.42);color:var(--acc)}
+  .emoClose{margin-left:auto;flex:none;width:26px;height:26px;border-radius:8px;border:0;
+    background:var(--panel3);color:var(--txt2);font-size:13px;cursor:pointer}
+  .emoClose:hover{color:var(--txt)}
+  .emoBody{overflow-y:auto;padding:6px 9px 11px}
+  .emoGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(40px,1fr));gap:1px}
+  .emoGrid button{font-size:23px;padding:7px 0;border:0;border-radius:9px;background:transparent;
+    cursor:pointer;transition:.1s;line-height:1.2}
+  .emoGrid button:hover{background:rgba(255,255,255,.09);transform:scale(1.15)}
+  .emoHint{font-size:12px;color:var(--muted);padding:4px 3px 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .emoHint button{font-size:12px;padding:5px 10px;border-radius:9px;border:1px solid var(--line2);
+    background:var(--panel3);color:var(--txt2);cursor:pointer}
+  .emoHint button:hover{color:var(--acc);border-color:var(--acc)}
+  .stkGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px}
+  .stkPackTitle{grid-column:1/-1;font-size:11px;font-weight:800;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.7px;margin:8px 0 1px}
+  .stkPackTitle:first-child{margin-top:0}
+  .stk{position:relative;aspect-ratio:1;background:#0e131a;border:1px solid var(--line);
+    border-radius:15px;display:grid;place-items:center;font-size:38px;cursor:pointer;transition:.14s;padding:0}
+  .stk:hover{border-color:var(--acc);transform:translateY(-3px);box-shadow:0 8px 18px rgba(0,0,0,.35)}
+  .stk .fav{position:absolute;top:3px;right:6px;font-size:12px;opacity:.5;line-height:1}
+  .stk .fav.on{opacity:1}
+  .stk .sticker.anim{animation:stkFloat 2.6s ease-in-out infinite}
+  .stkTool{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+  .stkTool button{font-size:12px;padding:7px 12px;border-radius:10px;border:1px solid var(--line2);
+    background:var(--panel3);color:var(--txt2);cursor:pointer}
+  .stkTool button:hover{color:var(--acc);border-color:var(--acc)}
+
+  .msg.big{font-size:45px;line-height:1.3;text-align:center;padding:12px 18px 9px;
+    max-width:min(56%,300px);letter-spacing:1px}
+  .msg.big .msgMeta{float:none;position:static;justify-content:center;margin-top:6px;font-size:11px}
+  .msg.stkMsg{background:transparent!important;box-shadow:none;border:0!important;
+    padding:3px 6px;max-width:min(48%,230px)}
+  .msg.stkMsg .msgWho{display:none}
+  .msg.stkMsg .msgMeta{float:none;position:static;justify-content:center;margin-top:3px;
+    background:rgba(0,0,0,.4);padding:2px 9px;border-radius:11px;font-size:10.5px}
+  .sticker{font-size:76px;line-height:1.04;filter:drop-shadow(0 7px 15px rgba(0,0,0,.4));user-select:none}
+  .sticker.anim{animation:stkIn .55s cubic-bezier(.2,1.5,.4,1)}
+  @keyframes stkIn{0%{transform:scale(.25) rotate(-14deg);opacity:0}
+    62%{transform:scale(1.1) rotate(4deg);opacity:1}100%{transform:none}}
+  @keyframes stkFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-5px) rotate(3deg)}}
+
   /* ---------- OVERLAY ---------- */
   .overlay{position:fixed;inset:0;z-index:50;background:rgba(5,8,11,.74);
     backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);
@@ -525,7 +596,12 @@
             <div class="ctxTxt" id="ctxTxt"></div>
           </div>
         </div>
+        <div class="emoPanel hidden" id="emoPanel">
+          <div class="emoTabs" id="emoTabs"></div>
+          <div class="emoBody" id="emoBody"></div>
+        </div>
         <div class="composer">
+          <button class="emoBtn" id="emoBtn" title="Emoji ve çıkartma">😊</button>
           <textarea id="input" rows="1" placeholder="Mesaj yaz"></textarea>
           <button class="sendBtn" id="sendBtn">➤</button>
         </div>
@@ -661,6 +737,7 @@
 </div>
 
 <audio id="remoteAudio" autoplay playsinline></audio>
+<div class="reactBar hidden" id="reactBar"></div>
 <div class="msgMenu hidden" id="msgMenu"></div>
 <div class="toast" id="toast"></div>
 <input type="file" id="photoInput" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">

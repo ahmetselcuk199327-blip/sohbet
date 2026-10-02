@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/fireba
 import {
   getFirestore, collection, doc, getDoc, setDoc, updateDoc, addDoc, deleteDoc,
   query, where, orderBy, onSnapshot, increment, serverTimestamp, writeBatch, getDocs,
-  arrayUnion, arrayRemove
+  arrayUnion, arrayRemove, FieldPath, deleteField
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -27,6 +27,54 @@ const uidify = s => trLow(s.trim())
   .replace(/[^a-z0-9_]/g,"").slice(0,20);
 const hhmm = ms => new Date(ms).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});
 const dayKey = ms => new Date(ms).toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric"});
+
+/* ===== EMOJI / REAKSIYON / CIKARTMA VERISI ===== */
+const QUICK_REACTS = ["👍","❤️","😂","😮","😢","🙏"];
+const EMOJI_CATS = [
+  { ad:"Yüzler", e:`😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😗 😚 😋 😛 😜 🤪 🤨 🧐 🤓 😎 🥳 😏 😒 😞 😔 😟 😕 🙁 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🤭 🤫 😶 😐 😑 😬 🙄 😯 😴 🤤 😪 😵 🤐 🥴 😷 🤒 🤕 🥱`.split(" ") },
+  { ad:"El & Kalp", e:`👍 👎 👌 🤌 🤏 ✌️ 🤞 🫶 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ ✋ 🖐️ 🤚 🖖 👋 🤝 🙏 💪 🫰 🫱 🫲 👏 🙌 👐 🤲 💖 💗 💘 💝 💞 💕 💔 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💡 🔥 ✨ 🎉 🎊 💥 ⭐ 🌟`.split(" ") },
+  { ad:"Doğa", e:`🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🦅 🦉 🦋 🐝 🐞 🐢 🐍 🐙 🦀 🐬 🐳 🌸 🌷 🌻 🌺 🌼 🌹 🥀 🌵 🌴 🌳 🌍 🌈 ⛅ ☀️ 🌙 ⭐ ⛄ ❄️ 🌊 🐾`.split(" ") },
+  { ad:"Yiyecek", e:`🍕 🍔 🍟 🌮 🌯 🥪 🍜 🍛 🍚 🍣 🥘 🍲 🥗 🍝 🍞 🥐 🥨 🧀 🥚 🍳 🥞 🧇 🍗 🍖 🦴 🐟 🍤 🍥 🍦 🍨 🍰 🎂 🍪 🍫 🍬 🍭 🍯 🥤 ☕ 🍵 🍺 🍻 🥂 🍷`.split(" ") },
+  { ad:"Eğlence", e:`⚽ 🏀 🏈 ⚾ 🎾 🏐 🏉 🎳 🎯 🎮 🎲 🧩 🎸 🎹 🎺 🎧 🎤 📷 🎬 🎭 🎪 🎠 🎢 🎡 🏆 🥇 🥈 🥉 🎗️ 🎁 🎈 🎀 🪄 🎿 🛹 🛼 🚴 🏄 🏊`.split(" ") },
+  { ad:"Sembol", e:`✅ ❌ ⚠️ 💯 🆗 🆒 ♻️ ⚡ 💤 🔥 💧 💎 🎯 🔒 🔓 🔑 🔨 ⚙️ 🔬 🔭 📡 🛰️ 🚀 ✈️ 🚗 🚲 🏠 🏢 🏥 🏫 🕌 ⛪ 🗽 🗺️ 📍 🏷️ 📌 ✂️ 📎 🖊️ 📝 📚 📢 🔔`.split(" ") }
+];
+const STICKER_PACKS = [
+  { ad:"Nexus", cikartmalar:[
+    { ad:"Selam", emoji:"👋", anim:true },
+    { ad:"Tamam", emoji:"👌", anim:true },
+    { ad:"Kalp", emoji:"❤️", anim:true },
+    { ad:"Alkış", emoji:"👏", anim:true },
+    { ad:"Güzel", emoji:"😍", anim:true },
+    { ad:"Gül", emoji:"😂" },
+    { ad:"Şaşkın", emoji:"🤯", anim:true },
+    { ad:"Düşün", emoji:"🤔" },
+    { ad:"Aferin", emoji:"🙌", anim:true },
+    { ad:"Güç", emoji:"💪", anim:true },
+    { ad:"Yıldız", emoji:"⭐" },
+    { ad:"Ateş", emoji:"🔥", anim:true }
+  ]},
+  { ad:"Sevgi", cikartmalar:[
+    { ad:"Öpücük", emoji:"😘", anim:true },
+    { ad:"Sarıl", emoji:"🥰", anim:true },
+    { ad:"Kalp kırık", emoji:"💔" },
+    { ad:"Kalpler", emoji:"💖", anim:true },
+    { ad:"Gülümse", emoji:"😊" },
+    { ad:"Sihir", emoji:"🪄", anim:true },
+    { ad:"Çiçek", emoji:"🌹" },
+    { ad:"Ay", emoji:"🌙" }
+  ]}
+];
+const EMOJI_SEQ = "\\p{Extended_Pictographic}(?:\\uFE0F|\\u20E3)?(?:\\u200D\\p{Extended_Pictographic}(?:\\uFE0F|\\u20E3)?)*";
+function emojiOnlyCount(text){
+  const t = String(text == null ? "" : text).trim();
+  if(!t) return 0;
+  try{
+    const whole = new RegExp("^(?:" + EMOJI_SEQ + ")(?:\\s*(?:" + EMOJI_SEQ + "))*$", "u");
+    if(!whole.test(t)) return 0;
+    const all = t.match(new RegExp(EMOJI_SEQ, "gu")) || [];
+    return (all.length >= 1 && all.length <= 3) ? all.length : 0;
+  }catch(e){ return 0; }
+}
 
 function toast(msg, err){
   const t = $("toast");
@@ -164,10 +212,12 @@ function startApp(){
 
   onSnapshot(collection(db,"kullanicilar"), snap=>{
     users = snap.docs.map(d=>({ uid:d.id, ...d.data() }));
+    syncMeMirror();
     renderMeBox();
     syncActiveNames();
     renderSide();
     renderChatHeader();
+    if(!$("emoPanel").classList.contains("hidden") && emoCat === "stk") renderEmoBody();
     if(!$("groupOverlay").classList.contains("hidden")) renderGroupPicker();
   }, e => toast("Kullanıcılar yüklenemedi: "+e.message, true));
 
@@ -454,6 +504,26 @@ function tickHtml(m, mine){
   return '<span class="ticks">✓</span>';
 }
 
+function reactHtml(m){
+  const r = m.reaks;
+  if(!r) return "";
+  const g = {};
+  Object.keys(r).forEach(u=>{
+    const e = r[u];
+    if(!e) return;
+    (g[e] = g[e] || []).push(u);
+  });
+  const ks = Object.keys(g);
+  if(!ks.length) return "";
+  return `<div class="msgReacts">` + ks.map(e=>{
+    const arr = g[e];
+    const on = arr.indexOf(me.uid) >= 0;
+    const title = arr.map(u=>adOf(u, u)).join(", ");
+    return `<button class="rct${on ? " mine" : ""}" data-rct="${esc(e)}" data-rmid="${m.id}" title="${esc(title)}">`
+      + e + (arr.length > 1 ? `<i>${arr.length}</i>` : "") + `</button>`;
+  }).join("") + `</div>`;
+}
+
 function renderMsgs(msgs){
   const box = $("msgs");
   const term = trLow($("msgSearch").value.trim());
@@ -477,11 +547,17 @@ function renderMsgs(msgs){
       ? `<div class="msgQuote" data-q="${esc(m.yanit.mid)}" title="O mesaja git">
            <b>${esc(m.yanit.ad)}</b><span>${esc(m.yanit.ozet || "")}</span></div>`
       : "";
+    const stk = m.sticker;
+    const body = stk
+      ? `<div class="sticker${stk.anim ? " anim" : ""}" title="${esc(stk.ad || "")}">${stk.emoji || "🙂"}</div>`
+      : highlight(m.icerik, term);
+    const big = !stk && emojiOnlyCount(m.icerik) > 0;
     const ed = m.duzenlendi ? " · düzenlendi" : "";
     const meta = mine
       ? `<span class="msgMeta">${hhmm(t)}${ed} ${tickHtml(m, mine)}</span>`
       : `<span class="msgMeta">${hhmm(t)}${ed}</span>`;
-    html += `<div class="msg ${mine?"me":"them"}" data-mid="${m.id}">${quote}${who}${highlight(m.icerik, term)}${meta}`
+    const cls = (mine ? "me" : "them") + (stk ? " stkMsg" : (big ? " big" : ""));
+    html += `<div class="msg ${cls}" data-mid="${m.id}">${quote}${who}${body}${meta}${reactHtml(m)}`
       + `<button class="msgMore" data-more="${m.id}" title="Mesaj işlemleri">⋮</button></div>`;
   });
 
@@ -638,6 +714,230 @@ async function doForward(chatId, otherUid){
 }
 $("fwdClose").addEventListener("click", ()=>{ $("fwdOverlay").classList.add("hidden"); fwdMid = null; });
 
+/* --- reaksiyon cubugu --- */
+let reactGuard = 0;
+function closeReactBar(){ const b = $("reactBar"); if(b) b.classList.add("hidden"); }
+function openReactBar(mid, x, y, below){
+  const m = lastMsgs.find(z=>z.id===mid);
+  if(!m || m.sistem) return;
+  closeEmoPanel();
+  const bar = $("reactBar");
+  bar.dataset.mid = mid;
+  bar.innerHTML = QUICK_REACTS.map(e=>`<button data-re="${e}" title="Tepki ver">${e}</button>`).join("")
+    + `<span class="rbSep"></span>`
+    + `<button data-rall="1" title="Daha fazla emoji">＋</button>`
+    + `<button class="rbMore" data-rmenu="1" title="Mesaj işlemleri">⋯</button>`;
+  bar.classList.remove("hidden");
+  const r = bar.getBoundingClientRect();
+  let px = Math.round(x - r.width / 2);
+  let py = below ? (y + 14) : (y - r.height - 14);
+  px = Math.max(8, Math.min(px, window.innerWidth - r.width - 8));
+  py = Math.max(8, Math.min(py, window.innerHeight - r.height - 8));
+  bar.style.left = px + "px";
+  bar.style.top = py + "px";
+  reactGuard = Date.now();
+}
+async function toggleReaction(mid, emoji){
+  const m = lastMsgs.find(z=>z.id===mid);
+  if(!m || !active) return;
+  const ref = doc(db, "sohbetler", active.id, "mesajlar", mid);
+  const cur = (m.reaks || {})[me.uid];
+  try{
+    if(cur === emoji) await updateDoc(ref, new FieldPath("reaks", me.uid), deleteField());
+    else await updateDoc(ref, new FieldPath("reaks", me.uid), emoji);
+  }catch(e){ toast("Tepki eklenemedi: "+e.message, true); }
+}
+$("reactBar").addEventListener("click", e=>{
+  const b = e.target.closest("button");
+  if(!b) return;
+  e.stopPropagation();
+  const mid = $("reactBar").dataset.mid;
+  if(b.dataset.re){ closeReactBar(); toggleReaction(mid, b.dataset.re); }
+  else if(b.dataset.rall){ closeReactBar(); openEmoPanel("react", mid); }
+  else if(b.dataset.rmenu){
+    closeReactBar();
+    const el = $("msgs").querySelector('.msg[data-mid="' + mid + '"]');
+    if(el){ const r = el.getBoundingClientRect(); openMsgMenu(mid, Math.max(8, r.left), r.bottom + 6); }
+  }
+});
+
+/* --- emoji / cikartma paneli --- */
+let emoMode = "chat", emoCat = 0, emoTarget = null;
+function closeEmoPanel(){ const p = $("emoPanel"); if(p) p.classList.add("hidden"); }
+function openEmoPanel(mode, mid){
+  emoMode = mode === "react" ? "react" : "chat";
+  emoTarget = emoMode === "react" ? (mid || null) : null;
+  if(emoMode === "react" && emoCat === "stk") emoCat = 0;
+  closeReactBar();
+  $("emoPanel").classList.remove("hidden");
+  renderEmoTabs();
+  renderEmoBody();
+}
+function renderEmoTabs(){
+  const tabs = EMOJI_CATS.map((c,i)=>
+    `<button class="emoTab${emoCat === i ? " on" : ""}" data-ecat="${i}">${esc(c.ad)}</button>`);
+  if(emoMode === "chat") tabs.push(`<button class="emoTab${emoCat === "stk" ? " on" : ""}" data-ecat="stk">🖼️ Çıkartmalar</button>`);
+  tabs.push(`<button class="emoClose" data-eclose="1" title="Kapat (Esc)">✕</button>`);
+  $("emoTabs").innerHTML = tabs.join("");
+}
+function renderEmoBody(){
+  if(emoCat === "stk"){ $("emoBody").innerHTML = stickerPanelHtml(); return; }
+  const c = EMOJI_CATS[emoCat] || EMOJI_CATS[0];
+  const hint = emoMode === "react"
+    ? `<div class="emoHint">Mesaja tepki vermek için bir emoji seç</div>` : "";
+  $("emoBody").innerHTML = hint + `<div class="emoGrid">` +
+    c.e.map(e=>`<button data-em="${e}">${e}</button>`).join("") + `</div>`;
+}
+function insertAtCursor(el, text){
+  if(!el) return;
+  const s = el.selectionStart == null ? el.value.length : el.selectionStart;
+  const en = el.selectionEnd == null ? el.value.length : el.selectionEnd;
+  el.value = el.value.slice(0, s) + text + el.value.slice(en);
+  try{ el.selectionStart = el.selectionEnd = s + text.length; }catch(e){}
+  el.focus();
+  el.dispatchEvent(new Event("input", { bubbles:true }));
+}
+
+/* --- cikartma paketleri --- */
+let myFav = null, myPacks = null;
+function myUserData(){ return userBy(me.uid) || {}; }
+function favKeys(){
+  if(Array.isArray(myFav)) return myFav;
+  const f = myUserData().favoriCik;
+  return Array.isArray(f) ? f : [];
+}
+function myImportedPacks(){
+  if(Array.isArray(myPacks)) return myPacks;
+  const p = myUserData().cikartmaPak;
+  return Array.isArray(p) ? p : [];
+}
+function syncMeMirror(){
+  const u = userBy(me.uid);
+  if(!u) return;
+  if(Array.isArray(u.favoriCik)) myFav = u.favoriCik;
+  if(Array.isArray(u.cikartmaPak)) myPacks = u.cikartmaPak;
+}
+function allStickerPacks(){
+  const packs = [];
+  STICKER_PACKS.forEach((p,i)=> packs.push({ key:"b"+i, ad:p.ad, cikartmalar:p.cikartmalar || [] }));
+  myImportedPacks().forEach((p,i)=> packs.push({ key:"i"+i, ad:(p && p.ad) || "İçe Aktarılan", cikartmalar:(p && p.cikartmalar) || [] }));
+  return packs;
+}
+function resolveSticker(key){
+  const p = String(key || "").split(":");
+  const kind = (p[0] || "").slice(0, 1), pi = Number((p[0] || "").slice(1)), si = Number(p[1]);
+  const src = kind === "b" ? STICKER_PACKS[pi] : myImportedPacks()[pi];
+  if(!src) return null;
+  const s = (src.cikartmalar || [])[si];
+  if(!s) return null;
+  return { emoji: s.emoji || "🙂", ad: s.ad || "", anim: !!s.anim };
+}
+function collectFavs(){
+  const out = [];
+  favKeys().forEach(k=>{ const s = resolveSticker(k); if(s) out.push(Object.assign({ key:k }, s)); });
+  return out;
+}
+function stkTile(key, s, on){
+  return `<div class="stk" data-stk="${esc(key)}" title="${esc(s.ad || "")}">`
+    + `<span class="sticker${s.anim ? " anim" : ""}">${s.emoji || "🙂"}</span>`
+    + `<span class="fav${on ? " on" : ""}" data-fav="${esc(key)}" title="Favorilere ekle/çıkar">${on ? "★" : "☆"}</span></div>`;
+}
+function stickerPanelHtml(){
+  const favs = favKeys();
+  const f = collectFavs();
+  let html = `<div class="stkGrid">`;
+  if(f.length){
+    html += `<div class="stkPackTitle">★ Favoriler · ${f.length}</div>`;
+    f.forEach(s=>{ html += stkTile(s.key, s, true); });
+  }
+  allStickerPacks().forEach(p=>{
+    if(!p.cikartmalar.length) return;
+    html += `<div class="stkPackTitle">${esc(p.ad)} · ${p.cikartmalar.length}</div>`;
+    p.cikartmalar.forEach((s, j)=>{
+      const key = p.key + ":" + j;
+      html += stkTile(key, s, favs.indexOf(key) >= 0);
+    });
+  });
+  html += `<div class="stkTool">`
+    + `<button data-stktool="import">📥 Paket içe aktar (JSON)</button>`
+    + `<button data-stktool="help">ℹ️ Paket biçimi</button></div></div>`
+    + `<input type="file" id="stkFile" accept="application/json,.json" style="display:none">`;
+  return html;
+}
+async function toggleFav(key){
+  try{
+    const has = favKeys().indexOf(key) >= 0;
+    await updateDoc(doc(db,"kullanicilar",me.uid),
+      { favoriCik: has ? arrayRemove(key) : arrayUnion(key) });
+    myFav = has ? favKeys().filter(k=>k!==key) : favKeys().concat([key]);
+    renderEmoBody();
+  }catch(e){ toast("Favori güncellenemedi: "+e.message, true); }
+}
+async function importStickerPack(file){
+  if(!file) return;
+  try{
+    const raw = await file.text();
+    const j = JSON.parse(raw);
+    const ad = String(j.ad || j.name || "İçe Aktarılan").slice(0,40);
+    const src = Array.isArray(j.cikartmalar) ? j.cikartmalar : (Array.isArray(j.stickers) ? j.stickers : []);
+    const list = src.map(s=>({
+      ad: String((s && (s.ad || s.name)) || "Çıkartma").slice(0,40),
+      emoji: String((s && s.emoji) || "🙂").slice(0,8),
+      anim: !!(s && (s.anim || s.animasyonlu))
+    })).slice(0,60);
+    if(!list.length){ toast("Pakette geçerli çıkartma yok", true); return; }
+    const pack = { ad, cikartmalar:list };
+    await updateDoc(doc(db,"kullanicilar",me.uid), { cikartmaPak: arrayUnion(pack) });
+    myPacks = myImportedPacks().concat([pack]);
+    renderEmoBody();
+    toast(`"${ad}" paketi içe aktarıldı (${list.length} çıkartma)`);
+  }catch(e){ toast("Paket içe aktarılamadı: "+e.message, true); }
+}
+$("emoPanel").addEventListener("click", async e=>{
+  const tab = e.target.closest("[data-ecat]");
+  if(tab){
+    emoCat = tab.dataset.ecat === "stk" ? "stk" : Number(tab.dataset.ecat);
+    renderEmoTabs(); renderEmoBody(); return;
+  }
+  if(e.target.closest("[data-eclose]")){ closeEmoPanel(); return; }
+  const em = e.target.closest("[data-em]");
+  if(em){
+    if(emoMode === "react"){ const mid = emoTarget; closeEmoPanel(); toggleReaction(mid, em.dataset.em); return; }
+    insertAtCursor($("input"), em.dataset.em);
+    return;
+  }
+  const tool = e.target.closest("[data-stktool]");
+  if(tool){
+    if(tool.dataset.stktool === "import"){ const f = $("stkFile"); if(f) f.click(); }
+    else toast('Paket JSON: {"ad":"Paketim","cikartmalar":[{"ad":"Selam","emoji":"👋","anim":true}]}');
+    return;
+  }
+  const fav = e.target.closest("[data-fav]");
+  if(fav){ await toggleFav(fav.dataset.fav); renderEmoBody(); return; }
+  const st = e.target.closest("[data-stk]");
+  if(st){
+    if(!active){ toast("Önce bir sohbet aç", true); return; }
+    const s = resolveSticker(st.dataset.stk);
+    if(!s) return;
+    closeEmoPanel();
+    try{ await postToChat(active.id, s.emoji, { sticker:{ emoji:s.emoji, ad:s.ad, anim:s.anim } }); }
+    catch(err){ toast("Gönderilemedi: "+err.message, true); }
+    return;
+  }
+});
+$("emoPanel").addEventListener("change", e=>{
+  if(e.target && e.target.id === "stkFile"){
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    importStickerPack(f);
+  }
+});
+$("emoBtn").addEventListener("click", e=>{
+  e.stopPropagation();
+  if($("emoPanel").classList.contains("hidden")) openEmoPanel("chat");
+  else closeEmoPanel();
+});
+
 async function doDelete(mid, kind){
   const m = lastMsgs.find(z=>z.id===mid);
   if(!m || !active) return;
@@ -677,11 +977,19 @@ async function doDelete(mid, kind){
     const r = b.getBoundingClientRect();
     openMsgMenu(b.dataset.more, r.left, r.bottom + 6);
   });
+  box.addEventListener("click", e=>{
+    const b = e.target.closest("[data-rct]");
+    if(!b) return;
+    e.stopPropagation();
+    toggleReaction(b.dataset.rmid, b.dataset.rct);
+  });
   box.addEventListener("contextmenu", e=>{
     const msg = e.target.closest(".msg");
     if(!msg || !msg.dataset.mid) return;
     e.preventDefault();
-    openMsgMenu(msg.dataset.mid, e.clientX, e.clientY);
+    const r = msg.getBoundingClientRect();
+    const below = r.top - 62 < 8;
+    openReactBar(msg.dataset.mid, r.left + Math.min(r.width/2, 150), below ? r.bottom : r.top, below);
   });
   let lpTimer = null, sx = 0, sy = 0;
   box.addEventListener("pointerdown", e=>{
@@ -691,7 +999,9 @@ async function doDelete(mid, kind){
     clearTimeout(lpTimer);
     lpTimer = setTimeout(()=>{
       if(navigator.vibrate) try{ navigator.vibrate(15); }catch(err){}
-      openMsgMenu(msg.dataset.mid, sx, sy);
+      const r = msg.getBoundingClientRect();
+      const below = r.top - 62 < 8;
+      openReactBar(msg.dataset.mid, sx, below ? r.bottom : r.top, below);
     }, 450);
   });
   const cancel = ()=> clearTimeout(lpTimer);
@@ -705,9 +1015,15 @@ async function doDelete(mid, kind){
     if(Date.now() - menuGuard < 400) return;
     if(!e.target.closest("#msgMenu")) closeMsgMenu();
   });
+  document.addEventListener("click", e=>{
+    if(Date.now() - reactGuard < 900) return;
+    if(!e.target.closest("#reactBar")) closeReactBar();
+  });
   document.addEventListener("keydown", e=>{
     if(e.key !== "Escape") return;
     closeMsgMenu();
+    closeReactBar();
+    if(!$("emoPanel").classList.contains("hidden")) closeEmoPanel();
     if(!$("ctxBar").classList.contains("hidden")) cancelCtx();
     if(!$("fwdOverlay").classList.contains("hidden")){
       $("fwdOverlay").classList.add("hidden");
@@ -793,6 +1109,7 @@ async function postToChat(chatId, icerik, opts, infoOverride){
   };
   if(opts.yanit) payload.yanit = opts.yanit;
   if(opts.iletilendi) payload.iletilendi = true;
+  if(opts.sticker) payload.sticker = opts.sticker;
   await addDoc(collection(ref,"mesajlar"), payload);
 
   const upd = {
