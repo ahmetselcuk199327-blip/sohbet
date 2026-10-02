@@ -330,6 +330,38 @@
     62%{transform:scale(1.1) rotate(4deg);opacity:1}100%{transform:none}}
   @keyframes stkFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-5px) rotate(3deg)}}
 
+  /* ---------- FOTOGRAF ---------- */
+  .attachBtn{font-size:19px}
+  .imgPre{display:flex;gap:10px;align-items:center;margin:11px 14px 0;padding:9px 10px;
+    background:var(--panel2);border:1px solid var(--line2);border-left:3px solid var(--acc);
+    border-radius:12px;animation:pop .14s ease}
+  .imgPre img{width:56px;height:56px;object-fit:cover;border-radius:10px;flex:none;background:#0e131a}
+  .imgPre .ipMain{min-width:0;flex:1}
+  .imgPre .ipMain b{display:block;font-size:12.5px;color:var(--acc);white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .imgPre .ipMain span{font-size:11.5px;color:var(--muted)}
+  .imgPreX{width:27px;height:27px;flex:none;border-radius:8px;font-size:13px;color:var(--muted);
+    background:var(--panel3);transition:.13s}
+  .imgPreX:hover{color:#ff8a8a;background:var(--line2)}
+  .msg.imgMsg{background:transparent!important;box-shadow:none;border:0!important;padding:3px 6px;
+    max-width:min(76%,430px)}
+  .msg.imgMsg .msgWho{display:none}
+  .msgPhoto{display:block;border-radius:15px;cursor:zoom-in;background:#0b0f14;
+    max-width:min(360px,62vw);max-height:58vh;object-fit:contain;box-shadow:var(--sh-1)}
+  .msg.imgMsg .msgMeta{float:none;position:static;justify-content:center;margin-top:5px;
+    background:rgba(0,0,0,.45);padding:2px 9px;border-radius:11px;font-size:10.5px}
+  .msgCap{display:block;white-space:pre-wrap;padding:5px 6px 0}
+  .ivBox{display:flex;flex-direction:column;align-items:center;gap:11px;max-width:min(96vw,1120px)}
+  .ivBox img{max-width:min(92vw,1080px);max-height:76vh;border-radius:14px;object-fit:contain;
+    box-shadow:0 24px 60px rgba(0,0,0,.62)}
+  .ivMeta{font-size:13px;color:var(--muted);text-align:center}
+  .ivClose{position:fixed;top:16px;right:18px;width:42px;height:42px;border-radius:50%;
+    font-size:19px;color:var(--txt);background:rgba(255,255,255,.1);z-index:2}
+  .ivClose:hover{background:rgba(255,255,255,.2)}
+  .ivSave{font-size:13px;padding:9px 17px;border-radius:11px;border:1px solid var(--line2);
+    background:var(--panel3);color:var(--txt);cursor:pointer;transition:.13s}
+  .ivSave:hover{color:var(--acc);border-color:var(--acc)}
+
   /* ---------- OVERLAY ---------- */
   .overlay{position:fixed;inset:0;z-index:50;background:rgba(5,8,11,.74);
     backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);
@@ -600,7 +632,13 @@
           <div class="emoTabs" id="emoTabs"></div>
           <div class="emoBody" id="emoBody"></div>
         </div>
+        <div class="imgPre hidden" id="imgPre">
+          <img id="imgPreThumb" alt="">
+          <div class="ipMain"><b id="imgPreName">Fotoğraf</b><span id="imgPreInfo">Hazırlanıyor…</span></div>
+          <button class="imgPreX" id="imgPreX" title="Fotoğrafı kaldır (Esc)">✕</button>
+        </div>
         <div class="composer">
+          <button class="emoBtn attachBtn" id="imgBtn" title="Fotoğraf gönder">📎</button>
           <button class="emoBtn" id="emoBtn" title="Emoji ve çıkartma">😊</button>
           <textarea id="input" rows="1" placeholder="Mesaj yaz"></textarea>
           <button class="sendBtn" id="sendBtn">➤</button>
@@ -688,6 +726,15 @@
   </div>
 </div>
 
+<div class="overlay hidden" id="imgView">
+  <button class="ivClose" id="imgViewClose" title="Kapat (Esc)">✕</button>
+  <div class="ivBox">
+    <img id="imgViewImg" alt="Fotoğraf">
+    <div class="ivMeta" id="imgViewMeta"></div>
+    <button class="ivSave" id="imgViewSave">⬇ Fotoğrafı indir</button>
+  </div>
+</div>
+
 <div class="overlay hidden" id="adminOverlay" style="align-items:stretch;padding:0">
   <div class="adminWrap">
     <div class="adminHead">
@@ -741,6 +788,7 @@
 <div class="msgMenu hidden" id="msgMenu"></div>
 <div class="toast" id="toast"></div>
 <input type="file" id="photoInput" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
+<input type="file" id="imgInput" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden">
 
 <script type="module" src="app.js"></script>
 </body>

@@ -101,6 +101,7 @@ let typingSeen = 0;
 let replyTo = null;
 let editing = null;
 let fwdMid = null;
+let pendingImg = null;
 
 /* ===== PROFIL YARDIMCILARI ===== */
 function initialsOf(name){
@@ -415,6 +416,7 @@ function enterChat(a){
   $("msgSearchBar").classList.add("hidden");
   $("msgSearch").value = "";
   $("input").value = "";
+  clearPendingImg();
   renderChatHeader();
   renderSide();
   updateDoc(doc(db,"sohbetler",active.id), { [`okunmamis.${me.uid}`]: 0 }).catch(()=>{});
@@ -487,6 +489,15 @@ function highlight(text, term){
   return i<0 ? safe : safe.slice(0,i)+"<mark>"+safe.slice(i,i+term.length)+"</mark>"+safe.slice(i+term.length);
 }
 
+function msgPreview(m){
+  if(!m) return "";
+  const t = m.icerik && String(m.icerik).trim();
+  if(t) return m.icerik;
+  if(m.gorsel) return "📷 Fotoğraf";
+  if(m.sticker) return m.sticker.emoji || "☆ Çıkartma";
+  return "";
+}
+
 function tickHtml(m, mine){
   if(!mine || !active) return "";
   const grp = active.type === "grup";
@@ -528,7 +539,7 @@ function renderMsgs(msgs){
   const box = $("msgs");
   const term = trLow($("msgSearch").value.trim());
   const visible = msgs.filter(m=> (m.silinen||[]).indexOf(me.uid) < 0);
-  const shown = term ? visible.filter(m=>trLow(m.icerik||"").includes(term)) : visible;
+  const shown = term ? visible.filter(m=>trLow(msgPreview(m)).includes(term)) : visible;
   const grp = active && active.type === "grup";
   let html = "", lastDay = "";
 
@@ -548,15 +559,23 @@ function renderMsgs(msgs){
            <b>${esc(m.yanit.ad)}</b><span>${esc(m.yanit.ozet || "")}</span></div>`
       : "";
     const stk = m.sticker;
+    const img = m.gorsel;
+    const cap = highlight(m.icerik || "", term);
+    const photo = (img && img.u)
+      ? `<img class="msgPhoto" src="${esc(img.u)}" alt="Fotoğraf" data-photo="${m.id}"`
+        + (img.w ? ` width="${img.w|0}"` : "") + (img.h ? ` height="${img.h|0}"` : "")
+        + ` loading="lazy">`
+      : "";
     const body = stk
       ? `<div class="sticker${stk.anim ? " anim" : ""}" title="${esc(stk.ad || "")}">${stk.emoji || "🙂"}</div>`
-      : highlight(m.icerik, term);
-    const big = !stk && emojiOnlyCount(m.icerik) > 0;
+      : photo + (cap && cap.trim() ? `<span class="msgCap">${cap}</span>` : "");
+    const big = !stk && !img && emojiOnlyCount(m.icerik || "") > 0;
     const ed = m.duzenlendi ? " · düzenlendi" : "";
     const meta = mine
       ? `<span class="msgMeta">${hhmm(t)}${ed} ${tickHtml(m, mine)}</span>`
       : `<span class="msgMeta">${hhmm(t)}${ed}</span>`;
-    const cls = (mine ? "me" : "them") + (stk ? " stkMsg" : (big ? " big" : ""));
+    const cls = (mine ? "me" : "them")
+      + (stk ? " stkMsg" : (img ? " imgMsg" : (big ? " big" : "")));
     html += `<div class="msg ${cls}" data-mid="${m.id}">${quote}${who}${body}${meta}${reactHtml(m)}`
       + `<button class="msgMore" data-more="${m.id}" title="Mesaj işlemleri">⋮</button></div>`;
   });
@@ -587,7 +606,8 @@ function openMsgMenu(mid, x, y){
   if(!m.sistem){
     items.push({ k:"reply", i:"↩", t:"Yanıtla" });
     items.push({ k:"fwd", i:"➡", t:"İlet" });
-    if(mine && Date.now() - (m.ts||0) < 15*60*1000) items.push({ k:"edit", i:"✏", t:"Düzenle" });
+    if(mine && Date.now() - (m.ts||0) < 15*60*1000)     items.push({ k:"edit", i:"✏", t:"Düzenle" });
+    if(m.gorsel && m.gorsel.u) items.push({ k:"save", i:"⬇", t:"Fotoğrafı indir" });
   }
   items.push({ k:"mine", i:"🙈", t:"Benden sil" });
   if(mine || isAdmin) items.push({ k:"all", i:"🗑", t:"Herkesten sil", d:true });
@@ -613,6 +633,7 @@ function openMsgMenu(mid, x, y){
       if(k === "reply") setReply(mid);
       else if(k === "fwd") openForward(mid);
       else if(k === "edit") startEdit(mid);
+      else if(k === "save") savePhoto(mid);
       else doDelete(mid, k);
     });
   });
@@ -623,7 +644,7 @@ function setReply(mid){
   const m = lastMsgs.find(z=>z.id===mid);
   if(!m) return;
   editing = null;
-  replyTo = { mid:m.id, yazan:m.yazan, ad:m.yazanAd || m.yazan, ozet:(m.icerik||"").slice(0,150) };
+  replyTo = { mid:m.id, yazan:m.yazan, ad:m.yazanAd || m.yazan, ozet:msgPreview(m).slice(0,150) };
   showCtx("reply");
   $("input").focus();
 }
@@ -683,7 +704,7 @@ function openForward(mid){
 
   const hasAny = !!(chatRows || peopleRows);
   $("fwdBody").innerHTML =
-    `<div class="fwdHint">Gönderilecek mesaj: <b>${esc((m.icerik||"").slice(0,90))}</b></div>` +
+    `<div class="fwdHint">Gönderilecek mesaj: <b>${esc(msgPreview(m).slice(0,90))}</b></div>` +
     (chatRows ? `<div class="fwdSec">Sohbetler</div>${chatRows}` : "") +
     (peopleRows ? `<div class="fwdSec">Kişiler</div>${peopleRows}` : "") +
     (hasAny ? "" : `<div class="emptyList">Hedef yok</div>`);
@@ -708,7 +729,9 @@ async function doForward(chatId, otherUid){
       chatId = await ensureDm(otherUid);
       info = { grp:false, uyeler:[me.uid, otherUid].sort() };
     }
-    await postToChat(chatId, m.icerik, { iletilendi:true }, info);
+    await postToChat(chatId, m.icerik || "", {
+      iletilendi:true, sticker:m.sticker || null, gorsel:m.gorsel || null
+    }, info);
     toast("Mesaj iletildi");
   }catch(e){ toast("İletilemedi: "+e.message, true); }
 }
@@ -983,6 +1006,12 @@ async function doDelete(mid, kind){
     e.stopPropagation();
     toggleReaction(b.dataset.rmid, b.dataset.rct);
   });
+  box.addEventListener("click", e=>{
+    const p = e.target.closest("[data-photo]");
+    if(!p) return;
+    e.stopPropagation();
+    openPhotoView(p.dataset.photo);
+  });
   box.addEventListener("contextmenu", e=>{
     const msg = e.target.closest(".msg");
     if(!msg || !msg.dataset.mid) return;
@@ -1023,8 +1052,10 @@ async function doDelete(mid, kind){
     if(e.key !== "Escape") return;
     closeMsgMenu();
     closeReactBar();
+    if(!$("imgView").classList.contains("hidden")) closePhotoView();
     if(!$("emoPanel").classList.contains("hidden")) closeEmoPanel();
     if(!$("ctxBar").classList.contains("hidden")) cancelCtx();
+    if(pendingImg && $("chatView") && !$("chatView").classList.contains("hidden")) clearPendingImg();
     if(!$("fwdOverlay").classList.contains("hidden")){
       $("fwdOverlay").classList.add("hidden");
       fwdMid = null;
@@ -1038,6 +1069,7 @@ $("backBtn").addEventListener("click", ()=>{
 });
 function closeChat(){
   active = null;
+  clearPendingImg();
   if(unsubMsgs){ unsubMsgs(); unsubMsgs = null; }
   lastMsgs = [];
   $("chatView").classList.add("hidden");
@@ -1110,23 +1142,124 @@ async function postToChat(chatId, icerik, opts, infoOverride){
   if(opts.yanit) payload.yanit = opts.yanit;
   if(opts.iletilendi) payload.iletilendi = true;
   if(opts.sticker) payload.sticker = opts.sticker;
+  if(opts.gorsel && opts.gorsel.u)
+    payload.gorsel = { u: opts.gorsel.u, w: opts.gorsel.w|0, h: opts.gorsel.h|0 };
   await addDoc(collection(ref,"mesajlar"), payload);
 
+  const preview = msgPreview({ icerik, gorsel: opts.gorsel, sticker: opts.sticker });
   const upd = {
-    sonMesaj: icerik, sonMesajYazar: me.uid, sonMesajYazarAd: me.ad,
+    sonMesaj: preview, sonMesajYazar: me.uid, sonMesajYazarAd: me.ad,
     sonMesajZaman: Date.now(), [`yaziyor.${me.uid}`]: 0
   };
   info.uyeler.forEach(u=>{
     if(u !== me.uid) upd[`okunmamis.${u}`] = increment(1);
   });
   updateDoc(ref, upd).catch(()=>{});
-  const to = info.uyeler.filter(u=>u !== me.uid);
-  Notif.notify(me.ad, icerik, "chat_" + chatId, to);
+  const to = info.uyeler.filter(u=> u !== me.uid);
+  Notif.notify(me.ad, preview || "Yeni mesaj", "chat_" + chatId, to);
 }
+
+/* ===== FOTOGRAF ===== */
+function clearPendingImg(){
+  pendingImg = null;
+  const p = $("imgPre");
+  if(p) p.classList.add("hidden");
+  const t = $("imgPreThumb");
+  if(t) t.removeAttribute("src");
+  const f = $("imgInput");
+  if(f) f.value = "";
+}
+function setPendingImg(u, w, h, name){
+  pendingImg = { u, w: w|0, h: h|0, name: name || "Fotoğraf" };
+  $("imgPreThumb").src = u;
+  $("imgPreName").textContent = name || "Fotoğraf";
+  const kb = Math.max(1, Math.round(u.length * 0.75 / 1024));
+  $("imgPreInfo").textContent = `${w||"?"}×${h||"?"} · ${kb} KB · göndermek için ➤`;
+  $("imgPre").classList.remove("hidden");
+}
+function shrinkPhoto(file){
+  const presets = [[1100,0.74],[880,0.7],[660,0.66],[460,0.6]];
+  let i = 0;
+  const next = ()=>{
+    if(i >= presets.length) return Promise.reject(new Error("Görsel işlenemedi veya çok büyük"));
+    const p = presets[i++];
+    return shrinkImage(file, p[0], p[1])
+      .then(u => (u.length <= 660 * 1024 ? u : next()))
+      .catch(()=> next());
+  };
+  return next();
+}
+function dataUrlDims(u){
+  return new Promise(res=>{
+    const i = new Image();
+    i.onload = ()=> res({ w:i.naturalWidth||0, h:i.naturalHeight||0 });
+    i.onerror = ()=> res({ w:0, h:0 });
+    i.src = u;
+  });
+}
+function savePhoto(mid){
+  const m = lastMsgs.find(z=>z.id===mid);
+  if(!m || !m.gorsel || !m.gorsel.u) return;
+  try{
+    const u = m.gorsel.u;
+    const ext = u.indexOf("image/png") >= 0 ? ".png" : (u.indexOf("image/webp") >= 0 ? ".webp" : ".jpg");
+    const a = document.createElement("a");
+    a.href = u;
+    a.download = "foto-" + String(m.id || Date.now()).slice(-10) + ext;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast("Fotoğraf indiriliyor");
+  }catch(e){ toast("İndirilemedi: " + e.message, true); }
+}
+function openPhotoView(mid){
+  const m = lastMsgs.find(z=>z.id===mid);
+  if(!m || !m.gorsel) return;
+  $("imgViewImg").src = m.gorsel.u;
+  $("imgViewImg").dataset.mid = mid;
+  $("imgViewMeta").textContent =
+    `${m.yazanAd || m.yazan || "?"} · ${hhmm(m.ts || Date.now())}` + (m.icerik ? ` · ${m.icerik}` : "");
+  $("imgView").classList.remove("hidden");
+}
+function closePhotoView(){
+  const ov = $("imgView");
+  if(ov) ov.classList.add("hidden");
+  const im = $("imgViewImg");
+  if(im){ im.removeAttribute("src"); delete im.dataset.mid; }
+}
+$("imgViewClose").addEventListener("click", closePhotoView);
+$("imgViewSave").addEventListener("click", ()=>{
+  const mid = $("imgViewImg").dataset.mid;
+  if(mid) savePhoto(mid);
+});
+$("imgView").addEventListener("click", e=>{ if(e.target === $("imgView")) closePhotoView(); });
+
+$("imgBtn").addEventListener("click", ()=> $("imgInput").click());
+$("imgPreX").addEventListener("click", clearPendingImg);
+$("imgInput").addEventListener("change", async e=>{
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if(!file) return;
+  if(!active){ toast("Önce bir sohbet aç", true); return; }
+  if(!/^image\//.test(file.type)){ toast("Sadece görsel dosyası olabilir", true); return; }
+  if(file.size > 12 * 1024 * 1024){ toast("Dosya çok büyük (en fazla 12 MB)", true); return; }
+  if(editing) cancelCtx();
+  closeEmoPanel();
+  $("imgPreName").textContent = file.name || "Fotoğraf";
+  $("imgPreInfo").textContent = "İşleniyor…";
+  $("imgPre").classList.remove("hidden");
+  try{
+    const u = await shrinkPhoto(file);
+    const d = await dataUrlDims(u);
+    setPendingImg(u, d.w, d.h, file.name);
+    $("input").focus();
+  }catch(err){ clearPendingImg(); toast(err.message || "Görsel işlenemedi", true); }
+});
 
 async function send(){
   const text = $("input").value.trim();
-  if(!text || !active) return;
+  const img = pendingImg;
+  if((!text && !img) || !active) return;
   $("input").value = "";
   $("input").style.height = "auto";
 
@@ -1143,8 +1276,8 @@ async function send(){
       const i = lastMsgs.findIndex(z=>z.id===mid);
       if(i >= 0) lastMsgs[i] = { ...lastMsgs[i], icerik: text, duzenlendi: Date.now() };
       const c = chats.find(x=>x.id===active.id);
-      if(c && c.sonMesaj === m.icerik){
-        updateDoc(doc(db,"sohbetler",active.id), { sonMesaj: text }).catch(()=>{});
+      if(c && c.sonMesaj === msgPreview(m)){
+        updateDoc(doc(db,"sohbetler",active.id), { sonMesaj: msgPreview(lastMsgs[i] || m) }).catch(()=>{});
       }
       renderMsgsFromCache();
       toast("Mesaj düzenlendi");
@@ -1154,9 +1287,20 @@ async function send(){
 
   const y = replyTo;
   cancelCtx();
+  clearPendingImg();
   try{
-    await postToChat(active.id, text, y ? { yanit: { mid:y.mid, yazan:y.yazan, ad:y.ad, ozet:y.ozet } } : {});
-  }catch(e){ toast("Gönderilemedi: "+e.message, true); }
+    await postToChat(active.id, text, {
+      yanit: y ? { mid:y.mid, yazan:y.yazan, ad:y.ad, ozet:y.ozet } : null,
+      gorsel: img
+    });
+  }catch(e){
+    if(img && img.u){
+      pendingImg = img;
+      setPendingImg(img.u, img.w, img.h, img.name);
+    }
+    $("input").value = text;
+    toast("Gönderilemedi: "+e.message, true);
+  }
 }
 $("sendBtn").addEventListener("click", send);
 $("input").addEventListener("keydown", e=>{
