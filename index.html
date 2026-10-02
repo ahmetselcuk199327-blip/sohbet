@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Nexus — Sohbet</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#11161d; --panel2:#161b24; --panel3:#1c2330;
+    --line:#232a36; --txt:#e6edf3; --muted:#8b949e;
+    --acc:#0dbd8b; --acc2:#14b8a6; --own:#0a5c45; --other:#1c2431;
+    --red:#f04a5e;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--txt); overflow:hidden;
+  }
+  button{font-family:inherit;cursor:pointer;border:0;background:none;color:inherit}
+  input,textarea{font-family:inherit}
+  .hidden{display:none!important}
+
+  .login{
+    height:100%;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(900px 500px at 50% -10%,#123028 0%,var(--bg) 60%);
+    padding:18px;
+  }
+  .loginBox{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line);
+    border-radius:16px;padding:28px 24px}
+  .logo{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:6px}
+  .logoMark{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--acc),#0b8f6a);color:#04140f;font-weight:800;font-size:19px}
+  .logoText{font-size:23px;font-weight:750;letter-spacing:.3px}
+  .logoText span{color:var(--acc)}
+  .sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px}
+  .field{margin-bottom:13px}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;letter-spacing:.4px;text-transform:uppercase}
+  .field input{width:100%;padding:12px 14px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;color:var(--txt);font-size:16px;outline:none;transition:.15s}
+  .field input:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(13,189,139,.14)}
+  .aliasPreview{text-align:center;font-size:13px;color:var(--acc);min-height:18px;margin:2px 0 14px;
+    font-family:ui-monospace,Consolas,monospace}
+  .btnMain{width:100%;padding:13px;border-radius:10px;font-size:15.5px;font-weight:700;
+    background:linear-gradient(90deg,var(--acc),var(--acc2));color:#04140f;transition:.15s}
+  .btnMain:hover{filter:brightness(1.08)}
+  .btnMain:disabled{opacity:.5;cursor:default}
+  .loginErr{color:var(--red);font-size:13.5px;text-align:center;min-height:18px;margin-top:10px}
+
+  .app{display:flex;height:100%}
+  .sidebar{width:340px;min-width:300px;background:var(--panel);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;height:100%}
+  .sideHead{padding:13px 14px 10px;border-bottom:1px solid var(--line)}
+  .sideTop{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}
+  .meBox{display:flex;align-items:center;gap:9px;min-width:0}
+  .meInfo{min-width:0}
+  .meName{font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meAlias{font-size:11.5px;color:var(--acc);font-family:ui-monospace,Consolas,monospace}
+  .iconBtn{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;font-size:17px;
+    background:var(--panel2);border:1px solid var(--line);transition:.15s;flex:none}
+  .iconBtn:hover{background:var(--panel3);border-color:var(--acc)}
+  .searchBox{position:relative}
+  .searchBox input{width:100%;padding:10px 13px 10px 36px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;color:var(--txt);font-size:14px;outline:none}
+  .searchBox input:focus{border-color:var(--acc)}
+  .searchBox .sIcon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:14px}
+  .sideTabs{display:flex;gap:6px;padding:9px 14px 0}
+  .sideTab{flex:1;padding:7px 6px;border-radius:8px 8px 0 0;font-size:13px;font-weight:600;
+    color:var(--muted);text-align:center;border-bottom:2px solid transparent}
+  .sideTab.on{color:var(--acc);border-bottom-color:var(--acc);background:rgba(13,189,139,.06)}
+  .sideList{flex:1;overflow-y:auto;padding:6px 7px 14px}
+  .sideList::-webkit-scrollbar{width:8px}
+  .sideList::-webkit-scrollbar-thumb{background:#29313f;border-radius:8px}
+
+  .row{display:flex;gap:11px;align-items:center;padding:10px 9px;border-radius:10px;cursor:pointer;
+    transition:background .12s}
+  .row:hover{background:var(--panel2)}
+  .row.on{background:rgba(13,189,139,.13)}
+  .avatar{width:44px;height:44px;flex:none;border-radius:11px;display:grid;place-items:center;
+    font-weight:750;font-size:17px;color:#04140f;position:relative}
+  .avatar.sm{width:36px;height:36px;font-size:14px;border-radius:9px}
+  .avatar .dot{position:absolute;right:-3px;bottom:-3px;width:12px;height:12px;border-radius:50%;
+    background:var(--acc);border:2.5px solid var(--panel)}
+  .rowMain{min-width:0;flex:1}
+  .rowLine1{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .rowName{font-size:14.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rowTime{font-size:11px;color:var(--muted);flex:none}
+  .rowLine2{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:3px}
+  .rowLast{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .badge{background:var(--acc);color:#04140f;font-size:11px;font-weight:800;min-width:19px;height:19px;
+    border-radius:10px;display:grid;place-items:center;padding:0 5px;flex:none}
+  .emptyList{padding:44px 18px;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.6}
+
+  .main{flex:1;display:flex;flex-direction:column;height:100%;min-width:0;background:var(--bg)}
+  .placeholder{flex:1;display:grid;place-items:center;text-align:center;color:var(--muted);gap:12px}
+  .placeholder .bigMark{font-size:54px;opacity:.35}
+  .chat{flex:1;display:flex;flex-direction:column;height:100%;min-width:0}
+  .chatHead{display:flex;align-items:center;gap:11px;padding:10px 14px;background:var(--panel);
+    border-bottom:1px solid var(--line)}
+  .backBtn{display:none;font-size:21px;padding:4px 8px;color:var(--muted)}
+  .chatTitle{min-width:0;flex:1;cursor:pointer}
+  .chatName{font-size:15.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chatStatus{font-size:12px;color:var(--muted);margin-top:1px}
+  .chatStatus.live{color:var(--acc)}
+  .headBtns{display:flex;gap:8px}
+  .searchMsgBar{padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .searchMsgBar input{width:100%;padding:8px 12px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:9px;color:var(--txt);font-size:14px;outline:none}
+  .searchMsgBar input:focus{border-color:var(--acc)}
+
+  .msgs{flex:1;overflow-y:auto;padding:16px 14px 10px;display:flex;flex-direction:column;gap:3px;
+    background:
+      linear-gradient(rgba(13,17,23,.94),rgba(13,17,23,.94)),
+      repeating-linear-gradient(45deg,#131a24 0 2px,transparent 2px 14px)}
+  .msgs::-webkit-scrollbar{width:8px}
+  .msgs::-webkit-scrollbar-thumb{background:#29313f;border-radius:8px}
+  .dayChip{align-self:center;background:var(--panel3);border:1px solid var(--line);
+    color:var(--muted);font-size:11.5px;padding:4px 12px;border-radius:12px;margin:10px 0 6px}
+  .msg{max-width:min(74%,560px);padding:7px 11px 6px;border-radius:12px;font-size:14.5px;
+    line-height:1.45;position:relative;word-break:break-word;white-space:pre-wrap;animation:pop .14s ease}
+  @keyframes pop{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+  .msg.me{align-self:flex-end;background:var(--own);border-bottom-right-radius:4px}
+  .msg.them{align-self:flex-start;background:var(--other);border-bottom-left-radius:4px}
+  .msgMeta{display:flex;gap:5px;justify-content:flex-end;align-items:center;margin-top:2px;
+    font-size:10.5px;color:#9fb3ad;float:right;margin-left:10px;position:relative;top:4px}
+  .ticks{font-size:12px;letter-spacing:-2px}
+  .ticks.read{color:#5eb0ff}
+  .msg mark{background:rgba(78,226,190,.28);color:#c9fff0;border-radius:3px;padding:0 1px}
+  .typingRow{align-self:flex-start;display:flex;gap:4px;padding:11px 14px;background:var(--other);
+    border-radius:12px;border-bottom-left-radius:4px;margin-top:4px}
+  .typingRow i{width:6px;height:6px;border-radius:50%;background:var(--acc);animation:blink 1.2s infinite}
+  .typingRow i:nth-child(2){animation-delay:.2s}
+  .typingRow i:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+
+  .composer{display:flex;gap:10px;align-items:flex-end;padding:10px 13px;background:var(--panel);
+    border-top:1px solid var(--line)}
+  .composer textarea{flex:1;resize:none;max-height:120px;padding:11px 14px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:12px;color:var(--txt);font-size:15px;outline:none;line-height:1.4}
+  .composer textarea:focus{border-color:var(--acc)}
+  .sendBtn{width:44px;height:44px;flex:none;border-radius:12px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--acc),var(--acc2));color:#04140f;font-size:18px;transition:.15s}
+  .sendBtn:hover{filter:brightness(1.1)}
+
+  .overlay{position:fixed;inset:0;z-index:50;background:rgba(6,9,13,.97);
+    display:flex;align-items:center;justify-content:center;padding:20px}
+  .callBox{text-align:center;width:100%;max-width:340px}
+  .callAvatar{width:112px;height:112px;border-radius:28px;margin:0 auto 20px;display:grid;place-items:center;
+    font-size:44px;font-weight:800;color:#04140f;position:relative}
+  .callAvatar.ringing::after{content:"";position:absolute;inset:-14px;border-radius:38px;
+    border:2px solid var(--acc);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%{transform:scale(.94);opacity:.9}70%{transform:scale(1.12);opacity:0}100%{opacity:0}}
+  .callName{font-size:24px;font-weight:750;margin-bottom:6px}
+  .callAlias{font-size:13px;color:var(--acc);font-family:ui-monospace,Consolas,monospace;margin-bottom:14px}
+  .callStatus{font-size:15px;color:var(--muted);margin-bottom:6px;min-height:21px}
+  .callTimer{font-size:15px;color:var(--acc);font-variant-numeric:tabular-nums;font-weight:700;min-height:20px}
+  .callActions{display:flex;justify-content:center;gap:34px;margin-top:38px}
+  .callActions.spaced{margin-top:50px}
+  .cBtn{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;font-size:25px;
+    transition:.15s;position:relative}
+  .cBtn.green{background:var(--acc);color:#04140f}
+  .cBtn.red{background:var(--red);color:#fff}
+  .cBtn.grey{background:var(--panel3);color:var(--txt);border:1px solid var(--line)}
+  .cBtn.grey.off{color:var(--red);border-color:var(--red)}
+  .cBtn:hover{filter:brightness(1.12)}
+  .cBtn small{position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);
+    font-size:11px;color:var(--muted);white-space:nowrap}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(90px);
+    background:var(--panel3);border:1px solid var(--line);color:var(--txt);padding:11px 18px;
+    border-radius:11px;font-size:14px;opacity:0;transition:.25s;z-index:99;max-width:90vw;text-align:center}
+  .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+  .toast.err{border-color:var(--red);color:#ffb9c0}
+
+  @media (max-width:760px){
+    .sidebar{width:100%;min-width:0;border-right:0}
+    .main{display:none}
+    body.inChat .sidebar{display:none}
+    body.inChat .main{display:flex}
+    .backBtn{display:block}
+    .msg{max-width:86%}
+  }
+</style>
+</head>
+<body>
+
+<div class="login" id="loginView">
+  <div class="loginBox">
+    <div class="logo"><div class="logoMark">N</div><div class="logoText">Nex<span>us</span></div></div>
+    <div class="sub">Takma adın ve PIN ile giriş yap</div>
+    <div class="field">
+      <label>Takma ad</label>
+      <input id="nick" placeholder="orn. ahmet" maxlength="20" autocomplete="username">
+    </div>
+    <div class="aliasPreview" id="aliasPrev">@kullanici:nexus</div>
+    <div class="field">
+      <label>4 haneli PIN</label>
+      <input id="pin" type="password" inputmode="numeric" placeholder="••••" maxlength="4" autocomplete="current-password">
+    </div>
+    <button class="btnMain" id="loginBtn">Giriş yap</button>
+    <div class="loginErr" id="loginErr"></div>
+  </div>
+</div>
+
+<div class="app hidden" id="appView">
+  <aside class="sidebar">
+    <div class="sideHead">
+      <div class="sideTop">
+        <div class="meBox">
+          <div class="avatar sm" id="meAvatar" style="background:#0dbd8b">?</div>
+          <div class="meInfo">
+            <div class="meName" id="meName">—</div>
+            <div class="meAlias" id="meAlias">@:nexus</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="iconBtn" id="newChatBtn" title="Yeni sohbet">＋</button>
+          <button class="iconBtn" id="logoutBtn" title="Çıkış">⎋</button>
+        </div>
+      </div>
+      <div class="searchBox">
+        <span class="sIcon">⌕</span>
+        <input id="sideSearch" placeholder="Sohbetlerde veya kişilerde ara">
+      </div>
+    </div>
+    <div class="sideTabs">
+      <button class="sideTab on" data-tab="chats">Sohbetler</button>
+      <button class="sideTab" data-tab="people">Kişiler</button>
+    </div>
+    <div class="sideList" id="sideList"></div>
+  </aside>
+
+  <main class="main">
+    <div class="placeholder" id="phView">
+      <div><div class="bigMark">▣</div>
+      <div style="font-size:15px;font-weight:650;color:#c9d1d9">Nexus'a hoş geldin</div>
+      <div style="font-size:13.5px;margin-top:6px">Soldan bir sohbet seç ya da <b>＋</b> ile yeni sohbet başlat</div></div>
+    </div>
+
+    <section class="chat hidden" id="chatView">
+      <div class="chatHead">
+        <button class="backBtn" id="backBtn">←</button>
+        <div class="avatar sm" id="chatAvatar" style="background:#0dbd8b">?</div>
+        <div class="chatTitle" id="chatTitleBtn">
+          <div class="chatName" id="chatName">—</div>
+          <div class="chatStatus" id="chatStatus">—</div>
+        </div>
+        <div class="headBtns">
+          <button class="iconBtn" id="msgSearchBtn" title="Mesajlarda ara">⌕</button>
+          <button class="iconBtn" id="callBtn" title="Sesli ara">📞</button>
+        </div>
+      </div>
+      <div class="searchMsgBar hidden" id="msgSearchBar">
+        <input id="msgSearch" placeholder="Bu sohbette mesaj ara">
+      </div>
+      <div class="msgs" id="msgs"></div>
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Mesaj yaz"></textarea>
+        <button class="sendBtn" id="sendBtn">➤</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="overlay hidden" id="ringOverlay">
+  <div class="callBox">
+    <div class="callAvatar ringing" id="ringAvatar" style="background:#0dbd8b">?</div>
+    <div class="callName" id="ringName">—</div>
+    <div class="callAlias" id="ringAlias">@:nexus</div>
+    <div class="callStatus">Sesli arama · gelen</div>
+    <div class="callActions spaced">
+      <button class="cBtn red" id="ringReject" title="Reddet">✆<small>Reddet</small></button>
+      <button class="cBtn green" id="ringAccept" title="Kabul et">✆<small>Kabul</small></button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="callOverlay">
+  <div class="callBox">
+    <div class="callAvatar" id="callAvatar" style="background:#0dbd8b">?</div>
+    <div class="callName" id="callName">—</div>
+    <div class="callAlias" id="callAlias">@:nexus</div>
+    <div class="callStatus" id="callStatus">Zil çalıyor…</div>
+    <div class="callTimer" id="callTimer"></div>
+    <div class="callActions">
+      <button class="cBtn grey" id="muteBtn" title="Mikrofon">🎙<small>Mikrofon</small></button>
+      <button class="cBtn red" id="endBtn" title="Sonlandır">✆<small>Kapat</small></button>
+    </div>
+  </div>
+</div>
+
+<audio id="remoteAudio" autoplay></audio>
+<div class="toast" id="toast"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
