@@ -226,13 +226,23 @@ function startApp(){
     chats = snap.docs.map(d=>({ id:d.id, ...d.data() }))
       .sort((a,b)=> (b.sonMesajZaman||0) - (a.sonMesajZaman||0));
     snap.docChanges().forEach(ch=>{
+      if(ch.type === "removed"){ delete mLastTs[ch.doc.id]; return; }
       const d = ch.doc.data();
       const ts = d.sonMesajZaman || 0;
+      const prev = mLastTs[ch.doc.id];
+      if(ch.type === "modified" && prev !== undefined && ts > 0 && ts > prev){
+        const patch = {};
+        if(d.arsiv && d.arsiv[me.uid]) patch[`arsiv.${me.uid}`] = false;
+        if(d.benden && d.benden[me.uid]) patch[`benden.${me.uid}`] = false;
+        if(Object.keys(patch).length) updateDoc(ch.doc.ref, patch).catch(()=>{});
+      }
+      if(prev === undefined || ts >= prev) mLastTs[ch.doc.id] = ts;
       if(!ts || d.sonMesajYazar === me.uid) return;
       if((d.uyeler||[]).indexOf(me.uid) < 0) return;
       const tz = (d.teslimZaman||{})[me.uid] || 0;
       if(ts > tz) updateDoc(ch.doc.ref, { [`teslimZaman.${me.uid}`]: ts }).catch(()=>{});
     });
+    if(!sweepStarted){ sweepStarted = true; setTimeout(sweepAll, 2500); }
     renderSide();
     if(active){
       renderChatHeader();
@@ -337,21 +347,54 @@ function previewOf(c){
   return prefix + (c.sonMesaj || "Henüz mesaj yok");
 }
 function isGrup(c){ return c && c.tur === "grup"; }
+
+/* ===== ARCIV / BENDEN SIL / KAYBOLAN MESAJLAR ===== */
+let archivOpen = false;
+let rowGuardT = 0;
+const mLastTs = {};
+const sweeping = new Set();
+let sweepStarted = false;
+const KB_OPTS = [
+  { v: 0, t: "Kapalı" },
+  { v: 60*60*1000, t: "1 saat" },
+  { v: 24*60*60*1000, t: "24 saat" },
+  { v: 7*24*60*60*1000, t: "7 gün" }
+];
+const KB_MAP = {};
+KB_OPTS.forEach(o => KB_MAP[o.v] = o.t);
+
+function chatById(cid){ return chats.find(x => x.id === cid); }
+function isArch(c){ return !!(c && c.arsiv && c.arsiv[me.uid]); }
+function isMineGone(c){ return !!(c && c.benden && c.benden[me.uid]); }
+function kbLabel(ms){ return KB_MAP[ms] || ""; }
+function kbState(cid){
+  const c = chatById(cid);
+  if(!c || !c.kaybolan || !c.kaybolanBas) return null;
+  return { ms: c.kaybolan, bas: c.kaybolanBas };
+}
+function dmIdOf(other){ return [me.uid, other].sort().join("~"); }
+function armRowGuard(){ rowGuardT = Date.now() + 900; }
+function kbSuffix(cid){ const st = kbState(cid); return st ? " · ⏳ " + kbLabel(st.ms) : ""; }
+
 function renderSide(){
   const box = $("sideList");
   const term = trLow($("sideSearch").value);
   let html = "";
 
   if(activeTab === "chats"){
-    const rows = chats.map(c=>{
+    const all = chats.map(c=>{
       const grp = isGrup(c);
       const other = grp ? null : c.uyeler.find(u=>u!==me.uid);
       const name = grp ? (c.grupAd || "Adsız grup")
         : adOf(other, (c.uyelerAd && c.uyelerAd[other]) || other);
       return { c, other, name, grp };
-    }).filter(r => !term || trLow(r.name).includes(term) || trLow(r.c.sonMesaj||"").includes(term));
+    }).filter(r => !isMineGone(r.c))
+      .filter(r => !term || trLow(r.name).includes(term) || trLow(r.c.sonMesaj||"").includes(term));
 
-    html = rows.length ? rows.map(({c,other,name,grp})=>{
+    const arch = term ? [] : all.filter(r => isArch(r.c));
+    const vis = term ? all : all.filter(r => !isArch(r.c));
+
+    const rowStr = ({c,other,name,grp})=>{
       const u = grp ? null : userBy(other);
       const p = u ? presenceOf(u) : { txt:"", live:false };
       const unread = (c.okunmamis && c.okunmamis[me.uid]) || 0;
@@ -361,21 +404,35 @@ function renderSide(){
         ? avatarHtml({ uid: c.id, icon: "👥" })
         : avatarHtml({ uid: other, ad: name, photo: fotoOf(other), dot: p.live });
       const sub = grp ? `${(c.uyeler||[]).length} üye` : "";
-      return `<div class="row${on}" ${grp?`data-cid="${c.id}"`:`data-chat="${other}"`}>
+      const cidAttr = grp ? `data-cid="${c.id}"` : `data-chat="${other}" data-chatid="${dmIdOf(other)}"`;
+      const kb = c.kaybolan ? ` ⏳` : "";
+      return `<div class="row${on}" ${cidAttr}>
         ${avatar}
         <div class="rowMain">
-          <div class="rowLine1"><span class="rowName">${esc(name)}</span><span class="rowTime">${time}</span></div>
+          <div class="rowLine1"><span class="rowName">${esc(name)}${kb}</span><span class="rowTime">${time}</span></div>
           <div class="rowLine2"><span class="rowLast">${esc(previewOf(c))}</span>
             ${unread?`<span class="badge">${unread}</span>`:""}</div>
           ${grp?`<div class="rowGrp">${sub}</div>`:""}
         </div></div>`;
-    }).join("") : `<div class="emptyList">${term?"Sonuç yok":"Henüz sohbetin yok.<br><b>Kişiler</b> sekmesinden birini seç ya da <b>👥</b> ile grup kur."}</div>`;
+    };
+
+    if(arch.length){
+      html += `<div class="row archRow${archivOpen?" on":""}" data-arch="1">
+        <span class="rowAvatarMini">📁</span>
+        <span class="aTxt">Arşivli sohbetler <span class="aCnt">(${arch.length})</span></span>
+        <span class="chev">›</span></div>`;
+      if(archivOpen) html += arch.map(rowStr).join("");
+    }
+    html += vis.length ? vis.map(rowStr).join("")
+      : (term ? `<div class="emptyList">Sonuç yok</div>`
+        : (arch.length ? ""
+          : `<div class="emptyList">Henüz sohbetin yok.<br><b>Kişiler</b> sekmesinden birini seç ya da <b>👥</b> ile grup kur.</div>`));
   }else{
     const rows = users.filter(u=>u.uid!==me.uid &&
       (!term || trLow(u.ad).includes(term) || trLow(u.uid).includes(term)));
     html = rows.length ? rows.map(u=>{
       const p = presenceOf(u);
-      return `<div class="row" data-chat="${u.uid}">
+      return `<div class="row" data-chat="${u.uid}" data-chatid="${dmIdOf(u.uid)}">
         ${avatarHtml({ uid: u.uid, ad: u.ad, photo: fotoOf(u.uid), dot: p.live })}
         <div class="rowMain">
           <div class="rowLine1"><span class="rowName">${esc(u.ad)}</span></div>
@@ -385,8 +442,39 @@ function renderSide(){
     }).join("") : `<div class="emptyList">${term?"Kişi bulunamadı":"Kayıtlı başka kişi yok.<br>Arkadaşların da Nexus'a gelsin!"}</div>`;
   }
   box.innerHTML = html;
-  box.querySelectorAll(".row").forEach(r=>{
+
+  const archRow = box.querySelector("[data-arch]");
+  if(archRow) archRow.addEventListener("click", ()=>{ archivOpen = !archivOpen; renderSide(); });
+
+  box.querySelectorAll(".row[data-chat],.row[data-cid]").forEach(r=>{
+    let lpTimer = null, sx = 0, sy = 0;
+    const cancel = ()=> clearTimeout(lpTimer);
+    r.addEventListener("pointerdown", e=>{
+      if(e.button === 2) return;
+      sx = e.clientX; sy = e.clientY;
+      clearTimeout(lpTimer);
+      lpTimer = setTimeout(()=>{
+        if(navigator.vibrate) try{ navigator.vibrate(15); }catch(err){}
+        openChatMenu(r, sx, sy);
+      }, 450);
+    });
+    r.addEventListener("pointerup", cancel);
+    r.addEventListener("pointercancel", cancel);
+    r.addEventListener("pointerleave", cancel);
+    r.addEventListener("pointermove", e=>{
+      if(Math.abs(e.clientX-sx) > 12 || Math.abs(e.clientY-sy) > 12) cancel();
+    });
+    r.addEventListener("contextmenu", e=>{
+      e.preventDefault(); cancel();
+      const rr = r.getBoundingClientRect();
+      openChatMenu(r, e.clientX || rr.left + 30, e.clientY || rr.top + 30);
+    });
     r.addEventListener("click", ()=>{
+      if(rowGuardT && Date.now() < rowGuardT){
+        rowGuardT = 0;
+        menuGuard = Date.now();
+        return;
+      }
       if(r.dataset.cid) openGroupChat(r.dataset.cid);
       else if(r.dataset.chat) openChat(r.dataset.chat);
     });
@@ -452,6 +540,7 @@ function enterChat(a){
     lastMsgsFor = active && active.id;
     renderMsgs(lastMsgs);
     markRead(ref, snap.docs, active && active.type === "grup");
+    sweepChat(a.id);
   }, e => toast("Mesajlar yüklenemedi: "+e.message, true));
 }
 
@@ -468,7 +557,7 @@ function renderChatHeader(){
     paintAvatar($("chatAvatar"), { uid: active.id, icon: "👥" });
     const st = $("chatStatus");
     st.className = "chatStatus";
-    st.textContent = `${n} üye · grup sohbeti`;
+    st.textContent = `${n} üye · grup sohbeti` + kbSuffix(active.id);
     return;
   }
   active.otherAd = adOf(active.other, active.otherAd);
@@ -478,7 +567,7 @@ function renderChatHeader(){
   paintAvatar($("chatAvatar"), { uid: active.other, ad: active.otherAd, photo: fotoOf(active.other) });
   const st = $("chatStatus");
   st.className = "chatStatus" + (p.live ? " live" : "");
-  st.textContent = p.txt;
+  st.textContent = p.txt + kbSuffix(active.id);
 }
 
 function markRead(ref, docs, grp){
@@ -561,7 +650,13 @@ function reactHtml(m){
 function renderMsgs(msgs){
   const box = $("msgs");
   const term = trLow($("msgSearch").value.trim());
-  const visible = msgs.filter(m=> (m.silinen||[]).indexOf(me.uid) < 0);
+  const kst = active ? kbState(active.id) : null;
+  const kcut = kst ? Date.now() - kst.ms : 0;
+  const visible = msgs.filter(m=>{
+    if((m.silinen||[]).indexOf(me.uid) >= 0) return false;
+    if(kst){ const t = m.ts || 0; if(t >= kst.bas && t <= kcut) return false; }
+    return true;
+  });
   const shown = term ? visible.filter(m=>trLow(msgPreview(m)).includes(term)) : visible;
   const grp = active && active.type === "grup";
   let html = "", lastDay = "";
@@ -635,9 +730,22 @@ function openMsgMenu(mid, x, y){
   items.push({ k:"mine", i:"🙈", t:"Benden sil" });
   if(mine || isAdmin) items.push({ k:"all", i:"🗑", t:"Herkesten sil", d:true });
 
+  showMenu(items, x, y, k=>{
+    if(k === "reply") setReply(mid);
+    else if(k === "fwd") openForward(mid);
+    else if(k === "edit") startEdit(mid);
+    else if(k === "save") savePhoto(mid);
+    else doDelete(mid, k);
+  });
+}
+
+function showMenu(items, x, y, onPick){
   const menu = $("msgMenu");
-  menu.innerHTML = items.map(it=>
-    `<button class="msgMenuItem${it.d?" danger":""}" data-mi="${it.k}"><span class="mi">${it.i}</span>${it.t}</button>`
+  menu.innerHTML = items.map(it =>
+    it.sep
+      ? `<div class="msgMenuSep">${esc(it.t)}</div>`
+      : `<button class="msgMenuItem${it.d?" danger":""}${it.dim?" dim":""}${it.on?" on":""}" data-mi="${esc(it.k)}"`
+        + `<span class="mi">${esc(it.i||"")}</span>${esc(it.t)}</button>`
   ).join("");
   menu.classList.remove("hidden");
   menuGuard = Date.now();
@@ -653,13 +761,147 @@ function openMsgMenu(mid, x, y){
       e.stopPropagation();
       const k = b.dataset.mi;
       closeMsgMenu();
-      if(k === "reply") setReply(mid);
-      else if(k === "fwd") openForward(mid);
-      else if(k === "edit") startEdit(mid);
-      else if(k === "save") savePhoto(mid);
-      else doDelete(mid, k);
+      onPick(k);
     });
   });
+}
+
+/* --- sohbet satiri menusu: uzun basma / sag tik --- */
+function openChatMenu(r, x, y){
+  const cid = r.dataset.cid || r.dataset.chatid;
+  const c = cid ? chatById(cid) : null;
+  if(!c) return;
+  const archd = isArch(c);
+  const cur = c.kaybolan || 0;
+  const items = [];
+  items.push({ k:"arch", i:"📁", t: archd ? "Arşivden çıkar" : "Arşivle" });
+  items.push({ k:"mine", i:"🙈", t:"Benden sil" });
+  items.push({ k:"all", i:"🗑", t:"Herkesten sil", d:true });
+  items.push({ sep:true, t:"Kaybolan mesajlar" });
+  KB_OPTS.forEach(o=>{
+    const on = cur === o.v;
+    items.push({ k:"kb:"+o.v, i: on ? "✓" : "○", t:o.t, dim: !on, on: on });
+  });
+  armRowGuard();
+  showMenu(items, x, y, k=>{
+    if(k === "arch") doArchive(cid, !archd);
+    else if(k === "mine") doHideForMe(cid);
+    else if(k === "all") doDeleteChat(cid);
+    else if(k.indexOf("kb:") === 0) setKaybolan(cid, Number(k.slice(3)));
+  });
+}
+
+/* --- sohbet arsivle / gizle / sil --- */
+function setArchLocal(cid, to){
+  const c = chatById(cid);
+  if(c){ c.arsiv = c.arsiv || {}; c.arsiv[me.uid] = to; }
+  if(to) archivOpen = true;
+  renderSide();
+}
+async function doArchive(cid, to){
+  setArchLocal(cid, to);
+  try{
+    await updateDoc(doc(db,"sohbetler",cid), { [`arsiv.${me.uid}`]: to });
+    toast(to ? "Sohbet arşivlendi" : "Sohbet arşivden çıkarıldı");
+  }catch(e){ setArchLocal(cid, !to); toast("Arşivlenemedi: "+e.message, true); }
+}
+
+async function doHideForMe(cid){
+  const c = chatById(cid);
+  if(c){ c.benden = c.benden || {}; c.benden[me.uid] = true; if(c.okunmamis) c.okunmamis[me.uid] = 0; }
+  if(active && active.id === cid) closeChat();
+  renderSide();
+  try{
+    await updateDoc(doc(db,"sohbetler",cid), { [`benden.${me.uid}`]: true, [`okunmamis.${me.uid}`]: 0 });
+    toast("Sohbet senden silindi");
+  }catch(e){
+    if(c && c.benden) c.benden[me.uid] = false;
+    renderSide();
+    toast("Silinemedi: "+e.message, true);
+  }
+}
+
+async function doDeleteChat(cid){
+  const ok = await confirmDlg("Bu sohbet ve içindeki tüm mesajlar iki taraftan da silinecek. Bu işlem geri alınamaz.", "Herkesten sil");
+  if(!ok) return;
+  const ref = doc(db,"sohbetler",cid);
+  try{
+    if(active && active.id === cid) closeChat();
+    const snap = await getDocs(collection(ref,"mesajlar"));
+    const ds = snap.docs;
+    for(let i = 0; i < ds.length; i += 300){
+      await Promise.all(ds.slice(i, i+300).map(d => deleteDoc(d.ref).catch(()=>{})));
+    }
+    await deleteDoc(ref);
+    toast("Sohbet herkesten silindi");
+  }catch(e){ toast("Silinemedi: "+e.message, true); }
+}
+
+/* --- onay diyalogu --- */
+let confirmCb = null;
+function confirmDlg(msg, title){
+  return new Promise(res=>{
+    if(confirmCb) confirmCb(false);
+    $("confTitle").textContent = title || "Onay";
+    $("confBody").textContent = msg;
+    $("confirmOverlay").classList.remove("hidden");
+    confirmCb = res;
+  });
+}
+function closeConfirm(v){
+  $("confirmOverlay").classList.add("hidden");
+  const cb = confirmCb; confirmCb = null;
+  if(cb) cb(!!v);
+}
+$("confOk").addEventListener("click", ()=> closeConfirm(true));
+$("confNo").addEventListener("click", ()=> closeConfirm(false));
+$("confirmOverlay").addEventListener("click", e=>{ if(e.target === $("confirmOverlay")) closeConfirm(false); });
+document.addEventListener("keydown", e=>{
+  if(e.key === "Escape" && !$("confirmOverlay").classList.contains("hidden")) closeConfirm(false);
+});
+
+/* --- kaybolan mesajlar temizligi --- */
+function sweepChat(cid){
+  const st = kbState(cid);
+  if(!st || sweeping.has(cid)) return Promise.resolve();
+  const cutoff = Date.now() - st.ms;
+  if(cutoff <= 0) return Promise.resolve();
+  sweeping.add(cid);
+  const ref = doc(db,"sohbetler",cid);
+  return getDocs(query(collection(ref,"mesajlar"), where("ts","<=", cutoff)))
+    .then(snap=>{
+      const gone = [];
+      snap.docs.forEach(d=>{
+        const t = d.data().ts || 0;
+        if(t >= st.bas && t <= cutoff) gone.push(d);
+      });
+      if(!gone.length) return null;
+      const ps = gone.map(d => deleteDoc(d.ref).catch(()=>{}));
+      let newest = 0;
+      gone.forEach(d => newest = Math.max(newest, d.data().ts || 0));
+      const c = chatById(cid);
+      if(newest > 0 && c && (c.sonMesajZaman || 0) <= newest){
+        ps.push(updateDoc(ref, { sonMesaj:"", sonMesajYazar:"", sonMesajYazarAd:"", sonMesajZaman:0 }).catch(()=>{}));
+      }
+      return Promise.all(ps);
+    })
+    .catch(()=>{})
+    .finally(()=>{ sweeping.delete(cid); });
+}
+function sweepAll(){ chats.forEach(c => { if(c.kaybolan) sweepChat(c.id); }); }
+setInterval(()=> sweepAll(), 60000);
+
+function setKaybolan(cid, ms){
+  const c = chatById(cid);
+  const wasOn = !!(c && c.kaybolan && c.kaybolanBas);
+  const bas = ms ? (wasOn ? c.kaybolanBas : Date.now()) : 0;
+  if(c){ c.kaybolan = ms; c.kaybolanBas = bas; }
+  if(active && active.id === cid) renderChatHeader();
+  renderSide();
+  toast(ms ? "Kaybolan mesajlar: " + kbLabel(ms) : "Kaybolan mesajlar kapatıldı");
+  updateDoc(doc(db,"sohbetler",cid), { kaybolan: ms, kaybolanBas: bas })
+    .then(()=>{ if(ms) sweepChat(cid); })
+    .catch(e => toast("Ayarlanamadı: "+e.message, true));
 }
 
 /* --- yanitla / ilet / duzenle --- */
